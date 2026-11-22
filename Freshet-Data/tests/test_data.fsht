@@ -1,0 +1,58 @@
+import freshet_data;
+
+@test fn statistics_match_reference_values() {
+    let values: [f64; 4] = [1.0, 2.0, 3.0, 4.0];
+    let result: Result<StatsF64, DataError> = statistics_f64(span(values));
+    match (result) {
+        Ok(stats) => {
+            assert(stats.count == 4);
+            assert(fabs(stats.mean - 2.5) < 1.0e-12);
+            assert(fabs(stats.variance - 1.25) < 1.0e-12);
+            assert(stats.minimum == 1.0);
+            assert(stats.maximum == 4.0);
+        }
+        Err(error) => { assert(false); }
+    }
+}
+
+@test fn affine_transform_is_elementwise() {
+    let input: [f64; 3] = [1.0, 2.0, 3.0];
+    let mut output: [f64; 3] = [0.0, 0.0, 0.0];
+    let result: Result<u64, DataError> = affine_transform_f64(span(input), span(output), 2.0, 1.0);
+    match (result) {
+        Ok(count) => { assert(count == 3); }
+        Err(error) => { assert(false); }
+    }
+    assert(output[0] == 3.0);
+    assert(output[1] == 5.0);
+    assert(output[2] == 7.0);
+}
+
+@test fn chunk_planning_covers_tail() {
+    let count: Result<u64, DataError> = chunk_count(1001, 256);
+    match (count) {
+        Ok(value) => { assert(value == 4); }
+        Err(error) => { assert(false); }
+    }
+    let offset: Result<u64, DataError> = chunk_offset(3, 256);
+    match (offset) {
+        Ok(value) => { assert(value == 768); }
+        Err(error) => { assert(false); }
+    }
+    let length: Result<u64, DataError> = chunk_length(1001, 768, 256);
+    match (length) {
+        Ok(value) => { assert(value == 233); }
+        Err(error) => { assert(false); }
+    }
+}
+
+@test fn empty_columns_are_rejected() {
+    let backing: [f64; 1] = [0.0];
+    let empty: Span<f64> = span(&backing[0], 0);
+    let result: Result<u64, DataError> = validate_column_f64(empty);
+    match (result) {
+        Ok(value) => { assert(false); }
+        Err(EmptyInput) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+}

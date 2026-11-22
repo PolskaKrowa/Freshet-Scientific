@@ -1,0 +1,25 @@
+import freshet_fluid;
+
+fn main() {
+    let nx: u64 = 16;
+    let ny: u64 = 16;
+    let cells: u64 = nx * ny;
+    let mut u: Vec<f64> = vec_new(f64, cells);
+    let mut v: Vec<f64> = vec_new(f64, cells);
+    let mut scalar: Vec<f64> = vec_new(f64, cells);
+    let mut next: Vec<f64> = vec_new(f64, cells);
+    vec_resize(&mut u, cells, 1.0);
+    vec_resize(&mut v, cells, 0.0);
+    vec_resize(&mut scalar, cells, 0.0);
+    vec_resize(&mut next, cells, 0.0);
+    let u_view: Span<f64> = vec_slice(u, 0, cells);
+    let v_view: Span<f64> = vec_slice(v, 0, cells);
+    let q_view: Span<f64> = vec_slice(scalar, 0, cells);
+    let next_view: Span<f64> = vec_slice(next, 0, cells);
+    let result: Result<u64, FluidError> = transport_scalar_upwind_2d(
+        nx, ny, 1.0, 1.0, 0.1, 0.0, u_view, v_view, q_view, next_view);
+    match (result) {
+        Ok(count) => { print("updated cells: "); print_u64(count); println(); }
+        Err(error) => { print("invalid fluid state"); println(); }
+    }
+}

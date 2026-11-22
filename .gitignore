@@ -1,0 +1,12 @@
+# Penstock outputs
+build/
+.penstock-cache/
+libfreshet_*.a
+*.ll
+*.o
+*.fprof
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+Testing/

@@ -1,0 +1,88 @@
+import freshet_fluid;
+
+@test fn grid_size_is_checked() {
+    let result: Result<u64, FluidError> = grid_cell_count_2d(8, 6);
+    match (result) {
+        Ok(cells) => { assert(cells == 48); }
+        Err(error) => { assert(false); }
+    }
+}
+
+@test fn zero_velocity_has_zero_divergence() {
+    let u: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let v: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut d: [f64; 9] = [9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0];
+    let result: Result<u64, FluidError> = divergence_2d(3, 3, 1.0, 1.0, span(u), span(v), span(d));
+    match (result) {
+        Ok(count) => { assert(count == 9); }
+        Err(error) => { assert(false); }
+    }
+    for (i in 0..9) { assert(fabs(d[i]) < 1.0e-12); }
+}
+
+@test fn stable_timestep_is_positive_for_stationary_field() {
+    let u: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let v: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let result: Result<f64, FluidError> = stable_timestep_2d(
+        3, 3, 1.0, 1.0, 0.01, 0.5, span(u), span(v));
+    match (result) {
+        Ok(dt) => { assert(dt > 0.0); }
+        Err(error) => { assert(false); }
+    }
+}
+
+@test fn scalar_transport_preserves_constant_field() {
+    let u: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let v: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let q: [f64; 9] = [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0];
+    let mut next: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let result: Result<u64, FluidError> = transport_scalar_upwind_2d(
+        3, 3, 1.0, 1.0, 0.1, 0.01, span(u), span(v), span(q), span(next));
+    match (result) {
+        Ok(count) => { assert(count == 9); }
+        Err(error) => { assert(false); }
+    }
+    for (i in 0..9) { assert(fabs(next[i] - 2.0) < 1.0e-12); }
+}
+
+@test fn laplacian_of_unit_impulse_is_minus_four_at_centre() {
+    let field: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+    let mut output: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let result: Result<u64, FluidError> = laplacian_2d(
+        3, 3, 1.0, 1.0, span(field), span(output));
+    match (result) {
+        Ok(count) => { assert(count == 9); }
+        Err(error) => { assert(false); }
+    }
+    assert(fabs(output[4] + 4.0) < 1.0e-12);
+}
+
+@test fn projection_preserves_a_quiescent_velocity_field() {
+    let mut u: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut v: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut pressure: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut scratch: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut divergence: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let result: Result<ProjectionReport, FluidError> = project_incompressible_2d(
+        3, 3, 1.0, 1.0, 0.1, 1.0,
+        span(u), span(v), span(pressure), span(scratch), span(divergence), 8, 1.0e-12);
+    match (result) {
+        Ok(report) => { assert(report.converged); }
+        Err(error) => { assert(false); }
+    }
+    for (i in 0..9) {
+        assert(fabs(u[i]) < 1.0e-12);
+        assert(fabs(v[i]) < 1.0e-12);
+    }
+}
+
+@test fn stable_timestep_accounts_for_advection_and_diffusion_together() {
+    let u: [f64; 9] = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+    let v: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let result: Result<f64, FluidError> = stable_timestep_2d(
+        3, 3, 1.0, 1.0, 0.01, 0.5, span(u), span(v));
+    match (result) {
+        Ok(dt) => { assert(fabs(dt - (0.5 / 1.04)) < 1.0e-12); }
+        Err(error) => { assert(false); }
+    }
+}

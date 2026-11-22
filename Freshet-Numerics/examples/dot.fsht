@@ -1,0 +1,11 @@
+import freshet_numerics;
+
+fn main() {
+    let x: [f64; 5] = [1.0, 2.0, 3.0, 4.0, 5.0];
+    let y: [f64; 5] = [5.0, 4.0, 3.0, 2.0, 1.0];
+    let value: Result<f64, NumericsError> = dot_f64(span(x), span(y));
+    match (value) {
+        Ok(answer) => { print("dot = "); print_f64(answer, 2); println(); }
+        Err(error) => { print("invalid dimensions"); println(); }
+    }
+}

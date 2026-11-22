@@ -1,0 +1,173 @@
+// Freshet-Data — contiguous column kernels and bounded-memory ingestion.
+module freshet_data;
+import io;
+
+pub enum DataError {
+    EmptyInput,
+    DimensionMismatch,
+    SizeOverflow,
+    InvalidChunkSize,
+    Io(IoError),
+    InvalidRecord
+}
+
+pub struct StatsF64 {
+    count: u64,
+    mean: f64,
+    variance: f64,
+    minimum: f64,
+    maximum: f64
+}
+
+fn open_data_reader(path: str) -> Result<Reader, DataError> {
+    let opened: Result<Reader, IoError> = io::reader_open(path);
+    match (opened) {
+        Ok(handle) => { return Ok(handle); }
+        Err(error) => { return Err(Io(error)); }
+    }
+}
+
+fn parse_f64_record(record: str) -> Result<f64, DataError> {
+    let parsed: Result<f64, ParseError> = parse_f64(record);
+    match (parsed) {
+        Ok(number) => { return Ok(number); }
+        Err(error) => { return Err(InvalidRecord); }
+    }
+}
+
+fn increment_record_count(count: u64) -> Result<u64, DataError> {
+    let next_count: Option<u64> = checked_add(count, 1);
+    match (next_count) {
+        Some(value) => { return Ok(value); }
+        None => { return Err(SizeOverflow); }
+    }
+}
+
+pub fn validate_column_f64(values: Span<f64>) -> Result<u64, DataError> {
+    if (values.len == 0) { return Err(EmptyInput); }
+    return Ok(values.len);
+}
+
+// Two-pass population statistics with deterministic floating-point reductions.
+pub fn statistics_f64(values: Span<f64>) -> Result<StatsF64, DataError> {
+    if (values.len == 0) { return Err(EmptyInput); }
+    let mut total: f64 = 0.0;
+    let mut minimum: f64 = values.ptr[0];
+    let mut maximum: f64 = values.ptr[0];
+    @reproducible parfor (i in 0..values.len) [
+        reduction(+:total), reduction(min:minimum), reduction(max:maximum)
+    ] {
+        total = total + values.ptr[i];
+        if (values.ptr[i] < minimum) { minimum = values.ptr[i]; }
+        if (values.ptr[i] > maximum) { maximum = values.ptr[i]; }
+    }
+    let mean: f64 = total / (values.len as f64);
+    let mut squared_deviation: f64 = 0.0;
+    @reproducible parfor (i in 0..values.len) [reduction(+:squared_deviation)] {
+        let delta: f64 = values.ptr[i] - mean;
+        squared_deviation = squared_deviation + delta * delta;
+    }
+    return Ok(StatsF64 {
+        count: values.len,
+        mean: mean,
+        variance: squared_deviation / (values.len as f64),
+        minimum: minimum,
+        maximum: maximum
+    });
+}
+
+// Elementwise affine transform. Input/output must be disjoint or exactly
+// aliased; partial overlap is not supported.
+pub fn affine_transform_f64(
+    input: Span<f64>, output: Span<f64>, scale: f64, offset: f64
+) -> Result<u64, DataError> {
+    if (input.len != output.len) { return Err(DimensionMismatch); }
+    let mut output_ptr: *f64 = output.ptr;
+    parfor (i in 0..input.len) {
+        output_ptr[i] = input.ptr[i] * scale + offset;
+    }
+    return Ok(input.len);
+}
+
+// Exact in-place copy is harmless; partial overlap is not supported.
+pub fn copy_f64(input: Span<f64>, output: Span<f64>) -> Result<u64, DataError> {
+    if (input.len != output.len) { return Err(DimensionMismatch); }
+    let mut output_ptr: *f64 = output.ptr;
+    parfor (i in 0..input.len) { output_ptr[i] = input.ptr[i]; }
+    return Ok(input.len);
+}
+
+// Number of chunks needed to cover total elements with a fixed block size.
+pub fn chunk_count(total: u64, chunk_size: u64) -> Result<u64, DataError> {
+    if (chunk_size == 0) { return Err(InvalidChunkSize); }
+    let full: u64 = total / chunk_size;
+    if (total % chunk_size == 0) { return Ok(full); }
+    let count: Option<u64> = checked_add(full, 1);
+    match (count) {
+        Some(value) => { return Ok(value); }
+        None => { return Err(SizeOverflow); }
+    }
+}
+
+pub fn chunk_offset(chunk_index: u64, chunk_size: u64) -> Result<u64, DataError> {
+    if (chunk_size == 0) { return Err(InvalidChunkSize); }
+    let offset: Option<u64> = checked_mul(chunk_index, chunk_size);
+    match (offset) {
+        Some(value) => { return Ok(value); }
+        None => { return Err(SizeOverflow); }
+    }
+}
+
+pub fn chunk_length(total: u64, offset: u64, chunk_size: u64) -> Result<u64, DataError> {
+    if (chunk_size == 0) { return Err(InvalidChunkSize); }
+    if (offset >= total) { return Ok(0); }
+    let remaining: u64 = total - offset;
+    let mut length: u64 = chunk_size;
+    if (remaining < chunk_size) { length = remaining; }
+    return Ok(length);
+}
+
+// Streaming text adapter: one finite f64 value per line. Uses a buffered
+// Reader and Welford's online algorithm; memory use is independent of file size.
+// This is a correctness/reference adapter, not the high-throughput binary path.
+pub fn scan_f64_lines(path: str) -> Result<StatsF64, DataError> {
+    let mut reader: Reader = open_data_reader(path)?;
+    let mut count: u64 = 0;
+    let mut mean: f64 = 0.0;
+    let mut m2: f64 = 0.0;
+    let mut minimum: f64 = 0.0;
+    let mut maximum: f64 = 0.0;
+    while (true) {
+        let next_line: Result<String, IoError> = io::reader_read_line(&mut reader);
+        match (next_line) {
+            Ok(line) => {
+                let value: f64 = parse_f64_record(str_of(&line))?;
+                // Reject NaN: x-x is NaN and therefore unequal to zero.
+                if (value - value != 0.0) { return Err(InvalidRecord); }
+                count = increment_record_count(count)?;
+                if (count == 1) {
+                    mean = value;
+                    minimum = value;
+                    maximum = value;
+                } else {
+                    let delta: f64 = value - mean;
+                    mean = mean + delta / (count as f64);
+                    let delta_after: f64 = value - mean;
+                    m2 = m2 + delta * delta_after;
+                    if (value < minimum) { minimum = value; }
+                    if (value > maximum) { maximum = value; }
+                }
+            }
+            Err(Eof) => { break; }
+            Err(error) => { return Err(Io(error)); }
+        }
+    }
+    if (count == 0) { return Err(EmptyInput); }
+    return Ok(StatsF64 {
+        count: count,
+        mean: mean,
+        variance: m2 / (count as f64),
+        minimum: minimum,
+        maximum: maximum
+    });
+}

@@ -1,0 +1,175 @@
+// Freshet-Numerics — initial f64 numerical kernels.
+// Targets the ratified fsht-03:03 language surface.
+module freshet_numerics;
+
+pub enum NumericsError {
+    DimensionMismatch,
+    SizeOverflow,
+    InvalidDimension,
+    InvalidTolerance,
+    NotPositiveDefinite
+}
+
+pub struct CGReport {
+    iterations: u64,
+    residual_norm: f64,
+    converged: bool
+}
+
+fn checked_product_size(value: Option<u64>) -> Result<u64, NumericsError> {
+    match (value) {
+        Some(size) => { return Ok(size); }
+        None => { return Err(SizeOverflow); }
+    }
+}
+
+// Deterministic dot product. The reduction is independent of worker count
+// for a fixed binary and uses the language's reproducible reduction contract.
+pub fn dot_f64(a: Span<f64>, b: Span<f64>) -> Result<f64, NumericsError> {
+    if (a.len != b.len) { return Err(DimensionMismatch); }
+    let mut sum: f64 = 0.0;
+    @reproducible parfor (i in 0..a.len) [reduction(+:sum)] {
+        sum = sum + a.ptr[i] * b.ptr[i];
+    }
+    return Ok(sum);
+}
+
+pub fn norm2_f64(a: Span<f64>) -> Result<f64, NumericsError> {
+    let square: f64 = dot_f64(a, a)?;
+    return Ok(sqrt(square));
+}
+
+// In-place BLAS-1 update: y <- alpha*x + y. Inputs must be disjoint or
+// exactly aliased; arbitrary partial overlap is not supported.
+pub fn axpy_f64(alpha: f64, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsError> {
+    if (x.len != y.len) { return Err(DimensionMismatch); }
+    // Keep the writable base as a pointer. Penstock's parfor checker permits
+    // disjoint indexed writes through pointer-typed captures, not Span fields.
+    let mut y_ptr: *f64 = y.ptr;
+    parfor (i in 0..x.len) {
+        y_ptr[i] = alpha * x.ptr[i] + y_ptr[i];
+    }
+    return Ok(x.len);
+}
+
+// Row-major square matrix-vector product: A[n,n] * x[n] -> y[n].
+// y must not overlap A or x.
+pub fn matvec_f64(n: u64, a: Span<f64>, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsError> {
+    if (n == 0) { return Err(InvalidDimension); }
+    let required: u64 = checked_product_size(checked_mul(n, n))?;
+    if (a.len != required || x.len != n || y.len != n) {
+        return Err(DimensionMismatch);
+    }
+    let mut y_ptr: *f64 = y.ptr;
+    parfor (row in 0..n) {
+        let mut sum: f64 = 0.0;
+        for (col in 0..n) {
+            sum = sum + a.ptr[row * n + col] * x.ptr[col];
+        }
+        y_ptr[row] = sum;
+    }
+    return Ok(n);
+}
+
+// Row-major dense matrix product: A[m,k] * B[k,n] -> C[m,n].
+// C must not overlap A or B. Parallelism is over rows; columns remain
+// contiguous, avoiding integer division/modulo in the hot loop.
+pub fn matmul_f64(
+    m: u64, k: u64, n: u64,
+    a: Span<f64>, b: Span<f64>, c: Span<f64>
+) -> Result<u64, NumericsError> {
+    if (m == 0 || k == 0 || n == 0) { return Err(InvalidDimension); }
+    let a_required: u64 = checked_product_size(checked_mul(m, k))?;
+    let b_required: u64 = checked_product_size(checked_mul(k, n))?;
+    let c_required: u64 = checked_product_size(checked_mul(m, n))?;
+    if (a.len != a_required || b.len != b_required || c.len != c_required) {
+        return Err(DimensionMismatch);
+    }
+    let mut c_ptr: *f64 = c.ptr;
+    parfor (row in 0..m) {
+        for (col in 0..n) {
+            let mut sum: f64 = 0.0;
+            for (inner in 0..k) {
+                sum = sum + a.ptr[row * k + inner] * b.ptr[inner * n + col];
+            }
+            c_ptr[row * n + col] = sum;
+        }
+    }
+    return Ok(c_required);
+}
+
+// Workspace-based conjugate gradient for symmetric positive-definite A.
+// A, b, x and the three workspaces must be pairwise disjoint. The workspaces
+// are caller-owned and reused on every iteration. x is updated in place.
+pub fn conjugate_gradient_f64(
+    n: u64,
+    a: Span<f64>,
+    b: Span<f64>,
+    x: Span<f64>,
+    residual: Span<f64>,
+    direction: Span<f64>,
+    product: Span<f64>,
+    max_iterations: u64,
+    tolerance: f64
+) -> Result<CGReport, NumericsError> {
+    if (n == 0) { return Err(InvalidDimension); }
+    if (tolerance < 0.0) { return Err(InvalidTolerance); }
+    let required: u64 = checked_product_size(checked_mul(n, n))?;
+    if (a.len != required || b.len != n || x.len != n || residual.len != n ||
+        direction.len != n || product.len != n) {
+        return Err(DimensionMismatch);
+    }
+
+    // Pointer-typed output bases are captured by the worker loop. This is the
+    // intended Freshet pattern for indexed, iteration-disjoint writes.
+    let mut x_ptr: *f64 = x.ptr;
+    let mut residual_ptr: *f64 = residual.ptr;
+    let mut direction_ptr: *f64 = direction.ptr;
+
+    // r = b - A*x; p = r
+    matvec_f64(n, a, x, product)?;
+    parfor (i in 0..n) {
+        residual_ptr[i] = b.ptr[i] - product.ptr[i];
+        direction_ptr[i] = residual_ptr[i];
+    }
+
+    let mut rr: f64 = dot_f64(residual, residual)?;
+    let mut residual_norm: f64 = sqrt(rr);
+    if (residual_norm <= tolerance) {
+        return Ok(CGReport { iterations: 0, residual_norm: residual_norm, converged: true });
+    }
+
+    let mut completed: u64 = 0;
+    let mut converged: bool = false;
+    for (iteration in 0..max_iterations) {
+        matvec_f64(n, a, direction, product)?;
+        let denominator: f64 = dot_f64(direction, product)?;
+        if (denominator <= 0.0) { return Err(NotPositiveDefinite); }
+        let alpha: f64 = rr / denominator;
+
+        parfor (i in 0..n) {
+            x_ptr[i] = x_ptr[i] + alpha * direction_ptr[i];
+            residual_ptr[i] = residual_ptr[i] - alpha * product.ptr[i];
+        }
+
+        let next_rr: f64 = dot_f64(residual, residual)?;
+        residual_norm = sqrt(next_rr);
+        completed = iteration + 1;
+        if (residual_norm <= tolerance) {
+            rr = next_rr;
+            converged = true;
+            break;
+        }
+
+        let beta: f64 = next_rr / rr;
+        parfor (i in 0..n) {
+            direction_ptr[i] = residual_ptr[i] + beta * direction_ptr[i];
+        }
+        rr = next_rr;
+    }
+    return Ok(CGReport {
+        iterations: completed,
+        residual_norm: residual_norm,
+        converged: converged
+    });
+}

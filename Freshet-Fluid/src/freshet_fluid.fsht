@@ -1,0 +1,272 @@
+// Freshet-Fluid — uniform-grid 2D CFD foundations.
+module freshet_fluid;
+
+pub enum FluidError {
+    InvalidGrid,
+    InvalidSpacing,
+    InvalidTimestep,
+    InvalidDensity,
+    InvalidViscosity,
+    InvalidCfl,
+    InvalidTolerance,
+    DimensionMismatch,
+    SizeOverflow
+}
+
+pub struct ProjectionReport {
+    iterations: u64,
+    maximum_update: f64,
+    converged: bool
+}
+
+// Return nx*ny after validating a minimum one-cell interior and safe sizing.
+pub fn grid_cell_count_2d(nx: u64, ny: u64) -> Result<u64, FluidError> {
+    if (nx < 3 || ny < 3) { return Err(InvalidGrid); }
+    let count: Option<u64> = checked_mul(nx, ny);
+    match (count) {
+        Some(value) => { return Ok(value); }
+        None => { return Err(SizeOverflow); }
+    }
+}
+
+// Cell-centred divergence. output must not overlap either input. Boundary
+// cells are zero; interior cells use second-order central differences.
+pub fn divergence_2d(
+    nx: u64, ny: u64, dx: f64, dy: f64,
+    u: Span<f64>, v: Span<f64>, output: Span<f64>
+) -> Result<u64, FluidError> {
+    if (dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    let cells: u64 = grid_cell_count_2d(nx, ny)?;
+    if (u.len != cells || v.len != cells || output.len != cells) {
+        return Err(DimensionMismatch);
+    }
+    let mut output_ptr: *f64 = output.ptr;
+    // A row-parallel traversal keeps columns contiguous and removes the
+    // runtime integer divide/modulo from every cell iteration.
+    parfor (row in 0..ny) {
+        for (col in 0..nx) {
+            let flat: u64 = row * nx + col;
+            if (row == 0 || row + 1 == ny || col == 0 || col + 1 == nx) {
+                output_ptr[flat] = 0.0;
+            } else {
+                let du_dx: f64 = (u.ptr[flat + 1] - u.ptr[flat - 1]) / (2.0 * dx);
+                let dv_dy: f64 = (v.ptr[flat + nx] - v.ptr[flat - nx]) / (2.0 * dy);
+                output_ptr[flat] = du_dx + dv_dy;
+            }
+        }
+    }
+    return Ok(cells);
+}
+
+// Cell-centred scalar Laplacian. output must not overlap field. Boundary
+// values are copied unchanged.
+pub fn laplacian_2d(
+    nx: u64, ny: u64, dx: f64, dy: f64,
+    field: Span<f64>, output: Span<f64>
+) -> Result<u64, FluidError> {
+    if (dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    let cells: u64 = grid_cell_count_2d(nx, ny)?;
+    if (field.len != cells || output.len != cells) { return Err(DimensionMismatch); }
+    let inv_dx2: f64 = 1.0 / (dx * dx);
+    let inv_dy2: f64 = 1.0 / (dy * dy);
+    let mut output_ptr: *f64 = output.ptr;
+    parfor (row in 0..ny) {
+        for (col in 0..nx) {
+            let flat: u64 = row * nx + col;
+            if (row == 0 || row + 1 == ny || col == 0 || col + 1 == nx) {
+                output_ptr[flat] = field.ptr[flat];
+            } else {
+                let d2x: f64 = (field.ptr[flat + 1] - 2.0 * field.ptr[flat] +
+                                 field.ptr[flat - 1]) * inv_dx2;
+                let d2y: f64 = (field.ptr[flat + nx] - 2.0 * field.ptr[flat] +
+                                 field.ptr[flat - nx]) * inv_dy2;
+                output_ptr[flat] = d2x + d2y;
+            }
+        }
+    }
+    return Ok(cells);
+}
+
+// First-order upwind advection plus explicit diffusion. The output span must
+// not overlap scalar or velocity inputs.
+pub fn transport_scalar_upwind_2d(
+    nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, viscosity: f64,
+    u: Span<f64>, v: Span<f64>, scalar: Span<f64>, output: Span<f64>
+) -> Result<u64, FluidError> {
+    if (dt <= 0.0) { return Err(InvalidTimestep); }
+    if (viscosity < 0.0) { return Err(InvalidViscosity); }
+    if (dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    let cells: u64 = grid_cell_count_2d(nx, ny)?;
+    if (u.len != cells || v.len != cells || scalar.len != cells || output.len != cells) {
+        return Err(DimensionMismatch);
+    }
+    let inv_dx: f64 = 1.0 / dx;
+    let inv_dy: f64 = 1.0 / dy;
+    let inv_dx2: f64 = inv_dx * inv_dx;
+    let inv_dy2: f64 = inv_dy * inv_dy;
+    let mut output_ptr: *f64 = output.ptr;
+    parfor (row in 0..ny) {
+        for (col in 0..nx) {
+            let flat: u64 = row * nx + col;
+            if (row == 0 || row + 1 == ny || col == 0 || col + 1 == nx) {
+                output_ptr[flat] = scalar.ptr[flat];
+            } else {
+                let u_right: f64 = 0.5 * (u.ptr[flat] + u.ptr[flat + 1]);
+                let u_left: f64 = 0.5 * (u.ptr[flat - 1] + u.ptr[flat]);
+                let v_top: f64 = 0.5 * (v.ptr[flat] + v.ptr[flat + nx]);
+                let v_bottom: f64 = 0.5 * (v.ptr[flat - nx] + v.ptr[flat]);
+                let mut flux_right: f64 = u_right * scalar.ptr[flat + 1];
+                let mut flux_left: f64 = u_left * scalar.ptr[flat];
+                let mut flux_top: f64 = v_top * scalar.ptr[flat + nx];
+                let mut flux_bottom: f64 = v_bottom * scalar.ptr[flat];
+                if (u_right >= 0.0) { flux_right = u_right * scalar.ptr[flat]; }
+                if (u_left >= 0.0) { flux_left = u_left * scalar.ptr[flat - 1]; }
+                if (v_top >= 0.0) { flux_top = v_top * scalar.ptr[flat]; }
+                if (v_bottom >= 0.0) { flux_bottom = v_bottom * scalar.ptr[flat - nx]; }
+                let advective: f64 =
+                    (flux_right - flux_left) * inv_dx +
+                    (flux_top - flux_bottom) * inv_dy;
+                let laplace: f64 =
+                    (scalar.ptr[flat + 1] - 2.0 * scalar.ptr[flat] +
+                     scalar.ptr[flat - 1]) * inv_dx2 +
+                    (scalar.ptr[flat + nx] - 2.0 * scalar.ptr[flat] +
+                     scalar.ptr[flat - nx]) * inv_dy2;
+                output_ptr[flat] = scalar.ptr[flat] - dt * advective +
+                                   dt * viscosity * laplace;
+            }
+        }
+    }
+    return Ok(cells);
+}
+
+// Recommend an explicit timestep from the combined advective and diffusive
+// rates. A stationary, inviscid field returns a large finite sentinel.
+pub fn stable_timestep_2d(
+    nx: u64, ny: u64, dx: f64, dy: f64, viscosity: f64, cfl: f64,
+    u: Span<f64>, v: Span<f64>
+) -> Result<f64, FluidError> {
+    if (dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (viscosity < 0.0) { return Err(InvalidViscosity); }
+    if (cfl <= 0.0 || cfl > 1.0) { return Err(InvalidCfl); }
+    let cells: u64 = grid_cell_count_2d(nx, ny)?;
+    if (u.len != cells || v.len != cells) { return Err(DimensionMismatch); }
+    let mut max_u: f64 = 0.0;
+    let mut max_v: f64 = 0.0;
+    @reproducible parfor (i in 0..cells) [reduction(max:max_u), reduction(max:max_v)] {
+        let au: f64 = fabs(u.ptr[i]);
+        let av: f64 = fabs(v.ptr[i]);
+        if (au > max_u) { max_u = au; }
+        if (av > max_v) { max_v = av; }
+    }
+    let advective_rate: f64 = max_u / dx + max_v / dy;
+    let diffusion_rate: f64 =
+        2.0 * viscosity * (1.0 / (dx * dx) + 1.0 / (dy * dy));
+    let total_rate: f64 = advective_rate + diffusion_rate;
+    if (total_rate > 0.0) { return Ok(cfl / total_rate); }
+    return Ok(1.0e300);
+}
+
+// pressure, pressure_scratch and divergence must be disjoint from one another
+// and from u/v; u and v must also be disjoint. Jacobi pressure iteration is
+// followed by the velocity correction u <- u - dt/rho * grad(p).
+pub fn project_incompressible_2d(
+    nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, density: f64,
+    u: Span<f64>, v: Span<f64>, pressure: Span<f64>, pressure_scratch: Span<f64>,
+    divergence: Span<f64>, max_iterations: u64, tolerance: f64
+) -> Result<ProjectionReport, FluidError> {
+    if (dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (dt <= 0.0) { return Err(InvalidTimestep); }
+    if (density <= 0.0) { return Err(InvalidDensity); }
+    if (tolerance < 0.0) { return Err(InvalidTolerance); }
+    let cells: u64 = grid_cell_count_2d(nx, ny)?;
+    if (u.len != cells || v.len != cells || pressure.len != cells ||
+        pressure_scratch.len != cells || divergence.len != cells) {
+        return Err(DimensionMismatch);
+    }
+    divergence_2d(nx, ny, dx, dy, u, v, divergence)?;
+
+    let dx2: f64 = dx * dx;
+    let dy2: f64 = dy * dy;
+    let denominator: f64 = 2.0 * (dx2 + dy2);
+    let rhs_scale: f64 = density / dt;
+    let mut pressure_ptr: *f64 = pressure.ptr;
+    let mut scratch_ptr: *f64 = pressure_scratch.ptr;
+    let mut u_ptr: *f64 = u.ptr;
+    let mut v_ptr: *f64 = v.ptr;
+    let mut iterations: u64 = 0;
+    let mut maximum_update: f64 = 0.0;
+    let mut converged: bool = false;
+
+    for (iteration in 0..max_iterations) {
+        let mut update: f64 = 0.0;
+        if (iteration % 2 == 0) {
+            parfor (row in 0..ny) [reduction(max:update)] {
+                for (col in 0..nx) {
+                    let flat: u64 = row * nx + col;
+                    if (row == 0 || row + 1 == ny || col == 0 || col + 1 == nx) {
+                        scratch_ptr[flat] = 0.0;
+                    } else {
+                        let rhs: f64 = rhs_scale * divergence.ptr[flat];
+                        let horizontal: f64 =
+                            (pressure_ptr[flat - 1] + pressure_ptr[flat + 1]) * dy2;
+                        let vertical: f64 =
+                            (pressure_ptr[flat - nx] + pressure_ptr[flat + nx]) * dx2;
+                        let next: f64 =
+                            (horizontal + vertical - rhs * dx2 * dy2) / denominator;
+                        scratch_ptr[flat] = next;
+                        let change: f64 = fabs(next - pressure_ptr[flat]);
+                        if (change > update) { update = change; }
+                    }
+                }
+            }
+        } else {
+            parfor (row in 0..ny) [reduction(max:update)] {
+                for (col in 0..nx) {
+                    let flat: u64 = row * nx + col;
+                    if (row == 0 || row + 1 == ny || col == 0 || col + 1 == nx) {
+                        pressure_ptr[flat] = 0.0;
+                    } else {
+                        let rhs: f64 = rhs_scale * divergence.ptr[flat];
+                        let horizontal: f64 =
+                            (scratch_ptr[flat - 1] + scratch_ptr[flat + 1]) * dy2;
+                        let vertical: f64 =
+                            (scratch_ptr[flat - nx] + scratch_ptr[flat + nx]) * dx2;
+                        let next: f64 =
+                            (horizontal + vertical - rhs * dx2 * dy2) / denominator;
+                        pressure_ptr[flat] = next;
+                        let change: f64 = fabs(next - scratch_ptr[flat]);
+                        if (change > update) { update = change; }
+                    }
+                }
+            }
+        }
+        iterations = iteration + 1;
+        maximum_update = update;
+        if (update <= tolerance) {
+            converged = true;
+            break;
+        }
+    }
+
+    // An odd iteration count leaves the newest pressure in scratch.
+    if (iterations % 2 == 1) {
+        parfor (i in 0..cells) { pressure_ptr[i] = scratch_ptr[i]; }
+    }
+
+    parfor (row in 0..ny) {
+        for (col in 0..nx) {
+            let flat: u64 = row * nx + col;
+            if (row > 0 && row + 1 < ny && col > 0 && col + 1 < nx) {
+                let dp_dx: f64 = (pressure_ptr[flat + 1] - pressure_ptr[flat - 1]) / (2.0 * dx);
+                let dp_dy: f64 = (pressure_ptr[flat + nx] - pressure_ptr[flat - nx]) / (2.0 * dy);
+                u_ptr[flat] = u_ptr[flat] - (dt / density) * dp_dx;
+                v_ptr[flat] = v_ptr[flat] - (dt / density) * dp_dy;
+            }
+        }
+    }
+    return Ok(ProjectionReport {
+        iterations: iterations,
+        maximum_update: maximum_update,
+        converged: converged
+    });
+}

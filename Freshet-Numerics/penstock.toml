@@ -1,0 +1,13 @@
+[project]
+name = "freshet_numerics"
+
+[target]
+type = "static-lib"
+src = ["src/freshet_numerics.fsht"]
+
+[build]
+opt = 4
+threads = 0
+
+[modules]
+path = ["src"]

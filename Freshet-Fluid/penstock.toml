@@ -1,0 +1,13 @@
+[project]
+name = "freshet_fluid"
+
+[target]
+type = "static-lib"
+src = ["src/freshet_fluid.fsht"]
+
+[build]
+opt = 4
+threads = 0
+
+[modules]
+path = ["src"]

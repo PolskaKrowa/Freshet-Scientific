@@ -1,0 +1,83 @@
+// Vendored Penstock fsht-03:01 io module (Apache-2.0).
+// Kept beside Freshet-Data so standalone library builds resolve `import io`
+// even when the compiler's share/penstock/modules directory is not installed.
+module io;
+
+extern fn frt_reader_open(path: str, out: *Reader) -> i64;
+extern fn frt_reader_stdin(out: *Reader);
+extern fn frt_reader_read(r: *Reader, buf: *u8, cap: u64) -> i64;
+extern fn frt_reader_read_line(r: *Reader, out: *String) -> i64;
+extern fn frt_writer_open(path: str, out: *Writer) -> i64;
+extern fn frt_writer_write(w: *Writer, data: str) -> i64;
+extern fn frt_writer_flush(w: *Writer) -> i64;
+extern fn frt_reader_close(r: *Reader);
+extern fn frt_writer_close(w: *Writer);
+extern fn frt_remove(path: str) -> i64;
+
+fn io_err(code: i64) -> IoError {
+    if (code == 1) { return NotFound; }
+    if (code == 2) { return Permission; }
+    if (code == 3) { return Eof; }
+    if (code == 4) { return Busy; }
+    return Other(code);
+}
+
+pub fn reader_open(path: str) -> Result<Reader, IoError> {
+    let mut r: Reader = Reader { handle: -1 };
+    let e: i64 = frt_reader_open(path, &mut r);
+    if (e == 0) { return Ok(r); }
+    return Err(io_err(e));
+}
+
+pub fn reader_stdin() -> Reader {
+    let mut r: Reader = Reader { handle: -1 };
+    frt_reader_stdin(&mut r);
+    return r;
+}
+
+pub fn reader_read(borrowed mut r: Reader, buf: Span<u8>) -> Result<usize, IoError> {
+    let n: i64 = frt_reader_read(&mut r, buf.ptr, buf.len);
+    if (n >= 0) { return Ok(n as usize); }
+    return Err(io_err(0 - n));
+}
+
+pub fn reader_read_line(borrowed mut r: Reader) -> Result<String, IoError> {
+    let mut line: String = string_new();
+    let e: i64 = frt_reader_read_line(&mut r, &mut line);
+    if (e == 0) { return Ok(line); }
+    return Err(io_err(e));
+}
+
+pub fn reader_close(borrowed mut r: Reader) {
+    frt_reader_close(&mut r);
+}
+
+pub fn writer_open(path: str) -> Result<Writer, IoError> {
+    let mut w: Writer = Writer { handle: -1 };
+    let e: i64 = frt_writer_open(path, &mut w);
+    if (e == 0) { return Ok(w); }
+    return Err(io_err(e));
+}
+
+pub fn writer_write(borrowed mut w: Writer, data: str) -> Result<usize, IoError> {
+    let n: i64 = frt_writer_write(&mut w, data);
+    if (n >= 0) { return Ok(n as usize); }
+    return Err(io_err(0 - n));
+}
+
+pub fn writer_flush(borrowed mut w: Writer) -> Result<usize, IoError> {
+    let n: i64 = frt_writer_flush(&mut w);
+    if (n >= 0) { return Ok(n as usize); }
+    return Err(io_err(0 - n));
+}
+
+pub fn writer_close(borrowed mut w: Writer) {
+    frt_writer_close(&mut w);
+}
+
+pub fn remove(path: str) -> Result<bool, IoError> {
+    let e: i64 = frt_remove(path);
+    if (e == 1) { return Ok(true); }
+    if (e == 0) { return Err(NotFound); }
+    return Err(io_err(0 - e));
+}
