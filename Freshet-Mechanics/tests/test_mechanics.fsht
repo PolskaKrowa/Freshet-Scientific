@@ -1,0 +1,193 @@
+import mechanics_common;
+import units;
+import vectors;
+import materials;
+import statics;
+import beams;
+import trusses;
+import stress;
+import fem;
+import freshet_numerics;
+
+@test fn dimensional_quantities_allow_only_matching_addition() {
+    let length: Result<QuantitySI, MechanicsError> = quantity_si(2.0, 1, 0, 0, 0, 0, 0, 0);
+    let another_length: Result<QuantitySI, MechanicsError> = quantity_si(300.0, 1, 0, 0, 0, 0, 0, 0);
+    let time: Result<QuantitySI, MechanicsError> = quantity_si(5.0, 0, 0, 1, 0, 0, 0, 0);
+    let a: QuantitySI = QuantitySI { value: 2.0, length_power: 1, mass_power: 0, time_power: 0, current_power: 0, temperature_power: 0, amount_power: 0, luminous_intensity_power: 0 };
+    let b: QuantitySI = QuantitySI { value: 300.0, length_power: 1, mass_power: 0, time_power: 0, current_power: 0, temperature_power: 0, amount_power: 0, luminous_intensity_power: 0 };
+    let wrong: QuantitySI = QuantitySI { value: 5.0, length_power: 0, mass_power: 0, time_power: 1, current_power: 0, temperature_power: 0, amount_power: 0, luminous_intensity_power: 0 };
+    let added: Result<QuantitySI, MechanicsError> = quantity_add_si(a, b);
+    let mismatch: Result<QuantitySI, MechanicsError> = quantity_add_si(a, wrong);
+    match (added) { Ok(value) => { assert(value.value == 302.0 && value.length_power == 1); } Err(error) => { assert(false); } }
+    match (mismatch) { Ok(value) => { assert(false); } Err(MechanicsError.MechanicsDimensionMismatch) => { assert(true); } Err(error) => { assert(false); } }
+    assert(millimetres(25.0) == 0.025);
+}
+
+@test fn vectors_and_statics_compute_resultants_and_moments() {
+    let a: Vector3 = Vector3 { x: 1.0, y: 0.0, z: 0.0 };
+    let b: Vector3 = Vector3 { x: 0.0, y: 1.0, z: 0.0 };
+    let cross: Vector3 = cross3(a, b);
+    assert(cross.z == 1.0 && dot3(a, b) == 0.0);
+    let positions: [Vector2; 2] = [Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }];
+    let forces: [Vector2; 2] = [Vector2 { x: 0.0, y: 10.0 }, Vector2 { x: -5.0, y: 0.0 }];
+    let result: Result<ForceMoment2D, MechanicsError> = resultant_force_moment_2d(span(positions), span(forces));
+    match (result) {
+        Ok(value) => { assert(value.resultant.x == -5.0 && value.resultant.y == 10.0); assert(value.moment_about_origin_nm == 15.0); }
+        Err(error) => { assert(false); }
+    }
+}
+
+@test fn isotropic_material_and_elastic_moduli_are_validated() {
+    let result: Result<IsotropicMaterial, MechanicsError> = isotropic_material(200.0e9, 0.3, 7850.0, megapascals(250.0));
+    match (result) {
+        Ok(material) => {
+            let shear: Result<f64, MechanicsError> = shear_modulus_pa(material);
+            let bulk: Result<f64, MechanicsError> = bulk_modulus_pa(material);
+            match (shear) { Ok(value) => { assert(fabs(value - 76.923076923e9) < 1.0e6); } Err(error) => { assert(false); } }
+            match (bulk) { Ok(value) => { assert(fabs(value - 166.666666667e9) < 1.0e6); } Err(error) => { assert(false); } }
+        }
+        Err(error) => { assert(false); }
+    }
+    let invalid: Result<IsotropicMaterial, MechanicsError> = isotropic_material(1.0, 0.5, 1.0, 1.0);
+    match (invalid) { Ok(material) => { assert(false); } Err(MechanicsError.InvalidMaterial) => { assert(true); } Err(error) => { assert(false); } }
+}
+
+
+@test fn material_response_functions_revalidate_public_material_values() {
+    let invalid: IsotropicMaterial = IsotropicMaterial {
+        young_modulus_pa: -1.0, poisson_ratio: 0.3,
+        density_kg_m3: 7850.0, yield_strength_pa: 250.0e6
+    };
+    let shear: Result<f64, MechanicsError> = shear_modulus_pa(invalid);
+    let bulk: Result<f64, MechanicsError> = bulk_modulus_pa(invalid);
+    match (shear) { Ok(value) => { assert(false); } Err(MechanicsError.InvalidMaterial) => { assert(true); } Err(error) => { assert(false); } }
+    match (bulk) { Ok(value) => { assert(false); } Err(MechanicsError.InvalidMaterial) => { assert(true); } Err(error) => { assert(false); } }
+}
+
+@test fn beam_reference_cases_match_closed_form() {
+    let udl: Result<BeamResponse, MechanicsError> = simply_supported_udl_f64(1000.0, 4.0, 200.0e9, 8.0e-6);
+    match (udl) {
+        Ok(result) => {
+            assert(fabs(result.maximum_shear_n - 2000.0) < 1.0e-9);
+            assert(fabs(result.maximum_moment_nm - 2000.0) < 1.0e-9);
+            assert(fabs(result.maximum_deflection_m - 0.0020833333333333333) < 1.0e-10);
+        }
+        Err(error) => { assert(false); }
+    }
+    let cantilever: Result<BeamResponse, MechanicsError> = cantilever_end_load_f64(100.0, 2.0, 200.0e9, 1.0e-5);
+    match (cantilever) { Ok(result) => { assert(result.maximum_shear_n == 100.0); assert(result.maximum_moment_nm == 200.0); } Err(error) => { assert(false); } }
+}
+
+@test fn truss_element_stiffness_is_symmetric() {
+    let mut stiffness: [f64; 16] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let result: Result<u64, MechanicsError> = truss_element_stiffness_2d(0.0, 0.0, 3.0, 4.0, 200.0e9, 0.01, span(stiffness));
+    match (result) { Ok(n) => { assert(n == 16); } Err(error) => { assert(false); } }
+    for (row in 0..4) { for (col in 0..4) { assert(fabs(stiffness[row * 4 + col] - stiffness[col * 4 + row]) < 1.0e-6); } }
+}
+
+@test fn plane_stress_von_mises_matches_reference() {
+    let state: PlaneStress2D = PlaneStress2D { sigma_x_pa: 100.0e6, sigma_y_pa: 0.0, tau_xy_pa: 0.0 };
+    let result: Result<f64, MechanicsError> = plane_stress_von_mises_f64(state);
+    match (result) { Ok(value) => { assert(fabs(value - 100.0e6) < 1.0); } Err(error) => { assert(false); } }
+}
+
+@test fn one_dimensional_bar_fem_assembles_and_solves() {
+    let coordinates: [f64; 3] = [0.0, 1.0, 2.0];
+    let node_a: [u64; 2] = [0, 1]; let node_b: [u64; 2] = [1, 2];
+    let mut stiffness: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut load: [f64; 3] = [0.0, 1000.0, 0.0];
+    let assembled: Result<u64, MechanicsError> = assemble_bar_system_1d(
+        3, 2, span(coordinates), span(node_a), span(node_b), 200.0e9, 0.01, span(stiffness), span(load));
+    match (assembled) { Ok(n) => { assert(n == 2); } Err(error) => { assert(false); } }
+    let constrained: [bool; 3] = [true, false, true];
+    let prescribed: [f64; 3] = [0.0, 0.0, 0.0];
+    let applied: Result<u64, MechanicsError> = apply_dirichlet_constraints_f64(3, span(constrained), span(prescribed), span(stiffness), span(load));
+    match (applied) { Ok(n) => { assert(n == 3); } Err(error) => { assert(false); } }
+    let mut x: [f64; 3] = [0.0, 0.0, 0.0];
+    let mut r: [f64; 3] = [0.0, 0.0, 0.0];
+    let mut p: [f64; 3] = [0.0, 0.0, 0.0];
+    let mut ap: [f64; 3] = [0.0, 0.0, 0.0];
+    let solved: Result<CGReport, MechanicsError> = solve_spd_system_f64(3, span(stiffness), span(load), span(x), span(r), span(p), span(ap), 20, 1.0e-12);
+    match (solved) { Ok(report) => { assert(report.converged); } Err(error) => { assert(false); } }
+    assert(fabs(x[1] - 2.5e-7) < 1.0e-12);
+}
+
+@test fn engineering_vector_norm_is_scaled_and_stable() {
+    let vector: Vector3 = Vector3 { x: 1.0e308, y: 1.0e308, z: 0.0 };
+    let result: Result<f64, MechanicsError> = norm3(vector);
+    match (result) { Ok(value) => { assert(value > 1.4e308 && value < 1.42e308); } Err(error) => { assert(false); } }
+}
+
+@test fn three_dimensional_truss_stiffness_is_symmetric() {
+    let mut stiffness: [f64; 36] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let result: Result<u64, MechanicsError> = truss_element_stiffness_3d(
+        0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 200.0e9, 0.01, span(stiffness));
+    match (result) { Ok(n) => { assert(n == 36); } Err(error) => { assert(false); } }
+    for (row in 0..6) { for (col in 0..6) { assert(fabs(stiffness[row * 6 + col] - stiffness[col * 6 + row]) < 1.0e-6); } }
+}
+
+@test fn principal_and_three_dimensional_von_mises_stresses_are_correct() {
+    let state: PlaneStress2D = PlaneStress2D { sigma_x_pa: 100.0e6, sigma_y_pa: 0.0, tau_xy_pa: 0.0 };
+    let principal: Result<PrincipalStress2D, MechanicsError> = plane_stress_principal_f64(state);
+    match (principal) { Ok(result) => { assert(fabs(result.maximum_pa - 100.0e6) < 1.0); assert(fabs(result.minimum_pa) < 1.0); } Err(error) => { assert(false); } }
+    let full: Stress3D = Stress3D { sigma_x_pa: 100.0e6, sigma_y_pa: 0.0, sigma_z_pa: 0.0, tau_xy_pa: 0.0, tau_yz_pa: 0.0, tau_zx_pa: 0.0 };
+    let equivalent: Result<f64, MechanicsError> = von_mises_3d_f64(full);
+    match (equivalent) { Ok(value) => { assert(fabs(value - 100.0e6) < 1.0); } Err(error) => { assert(false); } }
+}
+
+@test fn si_dimensions_distinguish_current_amount_and_luminous_intensity() {
+    let ampere: QuantitySI = QuantitySI { value: 1.0, length_power: 0, mass_power: 0, time_power: 0, current_power: 1, temperature_power: 0, amount_power: 0, luminous_intensity_power: 0 };
+    let mole: QuantitySI = QuantitySI { value: 1.0, length_power: 0, mass_power: 0, time_power: 0, current_power: 0, temperature_power: 0, amount_power: 1, luminous_intensity_power: 0 };
+    let candela: QuantitySI = QuantitySI { value: 1.0, length_power: 0, mass_power: 0, time_power: 0, current_power: 0, temperature_power: 0, amount_power: 0, luminous_intensity_power: 1 };
+    let current_plus_mole: Result<QuantitySI, MechanicsError> = quantity_add_si(ampere, mole);
+    let mole_plus_candela: Result<QuantitySI, MechanicsError> = quantity_add_si(mole, candela);
+    match (current_plus_mole) { Ok(value) => { assert(false); } Err(MechanicsError.MechanicsDimensionMismatch) => { assert(true); } Err(error) => { assert(false); } }
+    match (mole_plus_candela) { Ok(value) => { assert(false); } Err(MechanicsError.MechanicsDimensionMismatch) => { assert(true); } Err(error) => { assert(false); } }
+    assert(milliamperes(250.0) == 0.25);
+}
+
+@test fn vector_normalisation_rejects_zero_and_returns_unit_length() {
+    let value: Vector3 = Vector3 { x: 3.0, y: 4.0, z: 0.0 };
+    let unit: Result<Vector3, MechanicsError> = normalise3(value);
+    match (unit) {
+        Ok(result) => {
+            let result_norm: Result<f64, MechanicsError> = norm3(result);
+            match (result_norm) { Ok(length) => { assert(fabs(length - 1.0) < 1.0e-12); } Err(error) => { assert(false); } }
+        }
+        Err(error) => { assert(false); }
+    }
+    let zero: Vector2 = Vector2 { x: 0.0, y: 0.0 };
+    let invalid: Result<Vector2, MechanicsError> = normalise2(zero);
+    match (invalid) { Ok(result) => { assert(false); } Err(MechanicsError.InvalidGeometry) => { assert(true); } Err(error) => { assert(false); } }
+}
+
+
+@test fn stress_invariants_are_scaled_for_large_finite_values() {
+    let plane: PlaneStress2D = PlaneStress2D { sigma_x_pa: 1.0e200, sigma_y_pa: 0.0, tau_xy_pa: 0.0 };
+    let vm2: Result<f64, MechanicsError> = plane_stress_von_mises_f64(plane);
+    match (vm2) { Ok(value) => { assert(fabs(value / 1.0e200 - 1.0) < 1.0e-12); } Err(error) => { assert(false); } }
+    let full: Stress3D = Stress3D { sigma_x_pa: 1.0e200, sigma_y_pa: 0.0, sigma_z_pa: 0.0, tau_xy_pa: 0.0, tau_yz_pa: 0.0, tau_zx_pa: 0.0 };
+    let vm3: Result<f64, MechanicsError> = von_mises_3d_f64(full);
+    match (vm3) { Ok(value) => { assert(fabs(value / 1.0e200 - 1.0) < 1.0e-12); } Err(error) => { assert(false); } }
+}
+
+@test fn truss_geometry_norm_avoids_squaring_large_coordinates() {
+    let mut stiffness: [f64; 16] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let result: Result<u64, MechanicsError> = truss_element_stiffness_2d(0.0, 0.0, 1.0e150, 1.0e150, 200.0e9, 0.01, span(stiffness));
+    match (result) { Ok(n) => { assert(n == 16); } Err(error) => { assert(false); } }
+}
+
+@test fn imported_numerics_error_variants_resolve_alongside_mechanics_errors() {
+    let values: [f64; 2] = [1.6e308, 1.6e308];
+    let result: Result<f64, NumericsError> = norm2_f64(span(values));
+    match (result) {
+        Ok(value) => { assert(false); }
+        Err(NonFiniteResult) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+}

@@ -1,0 +1,13 @@
+[project]
+name = "freshet_mechanics"
+
+[target]
+type = "static-lib"
+src = ["src/freshet_mechanics.fsht"]
+
+[build]
+opt = 3
+threads = 0
+
+[modules]
+path = ["src", "../Freshet-Numerics/src"]

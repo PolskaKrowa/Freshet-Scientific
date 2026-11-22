@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(FreshetScientific VERSION 0.1.3 LANGUAGES NONE)
+project(FreshetScientific VERSION 0.2.0 LANGUAGES NONE)
 
 include(CTest)
 
@@ -27,9 +27,11 @@ endfunction()
 freshet_add_sublibrary(freshet_numerics "Freshet-Numerics" "libfreshet_numerics.a")
 freshet_add_sublibrary(freshet_fluid "Freshet-Fluid" "libfreshet_fluid.a")
 freshet_add_sublibrary(freshet_data "Freshet-Data" "libfreshet_data.a")
+freshet_add_sublibrary(freshet_mechanics "Freshet-Mechanics" "libfreshet_mechanics.a")
+add_dependencies(freshet_mechanics freshet_numerics)
 
 add_custom_target(freshet_scientific ALL
-  DEPENDS freshet_numerics freshet_fluid freshet_data)
+  DEPENDS freshet_numerics freshet_fluid freshet_data freshet_mechanics)
 
 if(BUILD_TESTING)
   add_test(NAME numerics
@@ -44,10 +46,17 @@ if(BUILD_TESTING)
     COMMAND "${PENSTOCK_EXECUTABLE}" test
             "${CMAKE_CURRENT_SOURCE_DIR}/Freshet-Data/tests/test_data.fsht"
             "-I${CMAKE_CURRENT_SOURCE_DIR}/Freshet-Data/src")
+  add_test(NAME mechanics
+    COMMAND "${PENSTOCK_EXECUTABLE}" test
+            "${CMAKE_CURRENT_SOURCE_DIR}/Freshet-Mechanics/tests/test_mechanics.fsht"
+            "-I${CMAKE_CURRENT_SOURCE_DIR}/Freshet-Mechanics/src"
+            "-I${CMAKE_CURRENT_SOURCE_DIR}/Freshet-Numerics/src")
   set_tests_properties(numerics PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/Freshet-Numerics")
   set_tests_properties(fluid PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/Freshet-Fluid")
   set_tests_properties(data PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/Freshet-Data")
+  set_tests_properties(mechanics PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/Freshet-Mechanics")
 endif()

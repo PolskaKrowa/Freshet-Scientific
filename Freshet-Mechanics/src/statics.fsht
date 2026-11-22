@@ -1,0 +1,45 @@
+module statics;
+import mechanics_common;
+import vectors;
+
+pub struct ForceMoment2D {
+    resultant: Vector2,
+    moment_about_origin_nm: f64
+}
+
+pub fn resultant_force_2d(forces: Span<Vector2>) -> Result<Vector2, MechanicsError> {
+    if (forces.len == 0) { return Err(MechanicsError.MechanicsInvalidDimension); }
+    let mut fx: f64 = 0.0;
+    let mut fy: f64 = 0.0;
+    for (i in 0..forces.len) {
+        if (!mechanics_finite_f64(forces.ptr[i].x) || !mechanics_finite_f64(forces.ptr[i].y)) { return Err(MechanicsError.MechanicsNonFiniteInput); }
+        fx = fx + forces.ptr[i].x;
+        fy = fy + forces.ptr[i].y;
+    }
+    if (!mechanics_finite_f64(fx) || !mechanics_finite_f64(fy)) { return Err(MechanicsError.MechanicsNonFiniteResult); }
+    return Ok(Vector2 { x: fx, y: fy });
+}
+
+pub fn moment_z_2d(position_m: Vector2, force_n: Vector2) -> Result<f64, MechanicsError> {
+    if (!mechanics_finite_f64(position_m.x) || !mechanics_finite_f64(position_m.y) ||
+        !mechanics_finite_f64(force_n.x) || !mechanics_finite_f64(force_n.y)) { return Err(MechanicsError.MechanicsNonFiniteInput); }
+    let moment: f64 = position_m.x * force_n.y - position_m.y * force_n.x;
+    if (!mechanics_finite_f64(moment)) { return Err(MechanicsError.MechanicsNonFiniteResult); }
+    return Ok(moment);
+}
+
+pub fn resultant_force_moment_2d(
+    positions: Span<Vector2>, forces: Span<Vector2>
+) -> Result<ForceMoment2D, MechanicsError> {
+    if (positions.len == 0 || positions.len != forces.len) { return Err(MechanicsError.MechanicsDimensionMismatch); }
+    let mut fx: f64 = 0.0; let mut fy: f64 = 0.0; let mut moment: f64 = 0.0;
+    for (i in 0..forces.len) {
+        if (!mechanics_finite_f64(positions.ptr[i].x) || !mechanics_finite_f64(positions.ptr[i].y) ||
+            !mechanics_finite_f64(forces.ptr[i].x) || !mechanics_finite_f64(forces.ptr[i].y)) { return Err(MechanicsError.MechanicsNonFiniteInput); }
+        fx = fx + forces.ptr[i].x;
+        fy = fy + forces.ptr[i].y;
+        moment = moment + positions.ptr[i].x * forces.ptr[i].y - positions.ptr[i].y * forces.ptr[i].x;
+    }
+    if (!mechanics_finite_f64(fx) || !mechanics_finite_f64(fy) || !mechanics_finite_f64(moment)) { return Err(MechanicsError.MechanicsNonFiniteResult); }
+    return Ok(ForceMoment2D { resultant: Vector2 { x: fx, y: fy }, moment_about_origin_nm: moment });
+}

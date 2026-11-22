@@ -1,6 +1,15 @@
-// Freshet-Data — contiguous column kernels and bounded-memory ingestion.
+// Freshet-Data — streaming, column-oriented and mergeable data primitives.
 module freshet_data;
 import io;
+
+#link c
+extern fn fopen(path: *u8, mode: *u8) -> *void;
+extern fn fread(buffer: *void, size: usize, count: usize, file: *void) -> usize;
+extern fn fwrite(buffer: *void, size: usize, count: usize, file: *void) -> usize;
+extern fn fclose(file: *void) -> i32;
+extern fn fflush(file: *void) -> i32;
+extern fn ferror(file: *void) -> i32;
+extern fn memcpy(destination: *void, source: *void, count: usize) -> *void;
 
 pub enum DataError {
     EmptyInput,
@@ -8,88 +17,322 @@ pub enum DataError {
     SizeOverflow,
     InvalidChunkSize,
     Io(IoError),
-    InvalidRecord
+    InvalidRecord,
+    NonFiniteInput,
+    NonFiniteResult,
+    FileOpenFailed,
+    FileReadFailed,
+    FileWriteFailed,
+    TruncatedBlock,
+    InvalidHistogram,
+    InvalidSchema
 }
+
+pub enum ByteOrder { Native, LittleEndian, BigEndian }
+pub enum ColumnType { F64, F32, I64, U64 }
 
 pub struct StatsF64 {
     count: u64,
     mean: f64,
+    m2: f64,
     variance: f64,
+    standard_deviation: f64,
     minimum: f64,
     maximum: f64
 }
 
-fn open_data_reader(path: str) -> Result<Reader, DataError> {
-    let opened: Result<Reader, IoError> = io::reader_open(path);
-    match (opened) {
-        Ok(handle) => { return Ok(handle); }
-        Err(error) => { return Err(Io(error)); }
-    }
+pub struct CovarianceAccumulatorF64 {
+    count: u64,
+    mean_x: f64,
+    mean_y: f64,
+    m2_x: f64,
+    m2_y: f64,
+    co_moment: f64
 }
 
-fn parse_f64_record(record: str) -> Result<f64, DataError> {
-    let parsed: Result<f64, ParseError> = parse_f64(record);
-    match (parsed) {
-        Ok(number) => { return Ok(number); }
-        Err(error) => { return Err(InvalidRecord); }
-    }
+pub struct CovarianceF64 {
+    count: u64,
+    mean_x: f64,
+    mean_y: f64,
+    covariance: f64,
+    variance_x: f64,
+    variance_y: f64,
+    correlation: f64,
+    correlation_defined: bool
 }
 
-fn increment_record_count(count: u64) -> Result<u64, DataError> {
-    let next_count: Option<u64> = checked_add(count, 1);
-    match (next_count) {
-        Some(value) => { return Ok(value); }
+pub struct HistogramReport {
+    in_range: u64,
+    below_range: u64,
+    above_range: u64
+}
+
+pub struct BinaryFile {
+    handle: *void,
+    byte_order: ByteOrder,
+    writable: bool
+}
+
+pub struct ColumnSchema {
+    name: str,
+    data_type: ColumnType,
+    byte_offset: u64
+}
+
+pub struct RecordBatchView {
+    row_count: u64,
+    columns: Span<ColumnSchema>,
+    payload: Span<u8>
+}
+
+// A statically-dispatched transform makes the reader -> reusable chunk ->
+// decode/validate -> parallel kernel -> writer path reusable without a
+// function-pointer call or per-chunk allocation.
+pub trait BinaryChunkTransformF64 {
+    fn transform(processor: Self, input: Span<f64>, output: Span<f64>) -> Result<u64, DataError>;
+}
+
+pub struct AffineTransformF64 {
+    scale: f64,
+    offset: f64
+}
+
+fn finite_f64(value: f64) -> bool { return value - value == 0.0; }
+
+fn checked_count(value: Option<u64>) -> Result<u64, DataError> {
+    match (value) {
+        Some(count) => { return Ok(count); }
         None => { return Err(SizeOverflow); }
     }
 }
 
-pub fn validate_column_f64(values: Span<f64>) -> Result<u64, DataError> {
-    if (values.len == 0) { return Err(EmptyInput); }
+fn validate_finite_f64(values: Span<f64>) -> Result<u64, DataError> {
+    for (i in 0..values.len) { if (!finite_f64(values.ptr[i])) { return Err(NonFiniteInput); } }
     return Ok(values.len);
 }
 
-// Two-pass population statistics with deterministic floating-point reductions.
+fn validate_finite_result_f64(values: Span<f64>) -> Result<u64, DataError> {
+    for (i in 0..values.len) { if (!finite_f64(values.ptr[i])) { return Err(NonFiniteResult); } }
+    return Ok(values.len);
+}
+
+pub fn validate_column_f64(values: Span<f64>) -> Result<u64, DataError> {
+    if (values.len == 0) { return Err(EmptyInput); }
+    validate_finite_f64(values)?;
+    return Ok(values.len);
+}
+
+// Welford online update. This is intentionally stable and serial for one
+// span; independent chunks can be merged with statistics_merge_f64 below.
 pub fn statistics_f64(values: Span<f64>) -> Result<StatsF64, DataError> {
     if (values.len == 0) { return Err(EmptyInput); }
-    let mut total: f64 = 0.0;
+    validate_finite_f64(values)?;
+    let mut count: u64 = 0;
+    let mut mean: f64 = 0.0;
+    let mut m2: f64 = 0.0;
     let mut minimum: f64 = values.ptr[0];
     let mut maximum: f64 = values.ptr[0];
-    @reproducible parfor (i in 0..values.len) [
-        reduction(+:total), reduction(min:minimum), reduction(max:maximum)
-    ] {
-        total = total + values.ptr[i];
-        if (values.ptr[i] < minimum) { minimum = values.ptr[i]; }
-        if (values.ptr[i] > maximum) { maximum = values.ptr[i]; }
+    for (i in 0..values.len) {
+        let next_count: u64 = checked_count(checked_add(count, 1))?;
+        let value: f64 = values.ptr[i];
+        if (next_count == 1) { minimum = value; maximum = value; }
+        if (value < minimum) { minimum = value; }
+        if (value > maximum) { maximum = value; }
+        let delta: f64 = value - mean;
+        mean = mean + delta / (next_count as f64);
+        let delta_after: f64 = value - mean;
+        m2 = m2 + delta * delta_after;
+        if (!finite_f64(mean) || !finite_f64(m2)) { return Err(NonFiniteResult); }
+        count = next_count;
     }
-    let mean: f64 = total / (values.len as f64);
-    let mut squared_deviation: f64 = 0.0;
-    @reproducible parfor (i in 0..values.len) [reduction(+:squared_deviation)] {
-        let delta: f64 = values.ptr[i] - mean;
-        squared_deviation = squared_deviation + delta * delta;
-    }
+    let variance: f64 = m2 / (count as f64);
+    if (!finite_f64(variance) || variance < 0.0) { return Err(NonFiniteResult); }
     return Ok(StatsF64 {
-        count: values.len,
-        mean: mean,
-        variance: squared_deviation / (values.len as f64),
-        minimum: minimum,
-        maximum: maximum
+        count: count, mean: mean, m2: m2, variance: variance,
+        standard_deviation: sqrt(variance), minimum: minimum, maximum: maximum
     });
 }
 
-// Elementwise affine transform. Input/output must be disjoint or exactly
-// aliased; partial overlap is not supported.
+// Chan merge: combine two independently accumulated, non-empty chunks.
+// Merge chunks in ascending chunk-index order for deterministic results.
+pub fn statistics_merge_f64(a: StatsF64, b: StatsF64) -> Result<StatsF64, DataError> {
+    if (a.count == 0 || b.count == 0) { return Err(EmptyInput); }
+    if (!finite_f64(a.mean) || !finite_f64(b.mean) || !finite_f64(a.m2) || !finite_f64(b.m2) ||
+        !finite_f64(a.minimum) || !finite_f64(b.minimum) || !finite_f64(a.maximum) || !finite_f64(b.maximum) ||
+        a.m2 < 0.0 || b.m2 < 0.0 || a.minimum > a.maximum || b.minimum > b.maximum) { return Err(NonFiniteInput); }
+    let count: u64 = checked_count(checked_add(a.count, b.count))?;
+    let delta: f64 = b.mean - a.mean;
+    let mean: f64 = a.mean + delta * ((b.count as f64) / (count as f64));
+    let weight: f64 = ((a.count as f64) * (b.count as f64)) / (count as f64);
+    let m2: f64 = a.m2 + b.m2 + delta * delta * weight;
+    let variance: f64 = m2 / (count as f64);
+    if (!finite_f64(mean) || !finite_f64(m2) || !finite_f64(variance)) { return Err(NonFiniteResult); }
+    let mut minimum: f64 = a.minimum;
+    let mut maximum: f64 = a.maximum;
+    if (b.minimum < minimum) { minimum = b.minimum; }
+    if (b.maximum > maximum) { maximum = b.maximum; }
+    return Ok(StatsF64 {
+        count: count, mean: mean, m2: m2, variance: variance,
+        standard_deviation: sqrt(variance), minimum: minimum, maximum: maximum
+    });
+}
+
+pub fn standard_deviation_f64(values: Span<f64>) -> Result<f64, DataError> {
+    let stats: StatsF64 = statistics_f64(values)?;
+    return Ok(stats.standard_deviation);
+}
+
+pub fn covariance_accumulator_empty_f64() -> CovarianceAccumulatorF64 {
+    return CovarianceAccumulatorF64 {
+        count: 0, mean_x: 0.0, mean_y: 0.0, m2_x: 0.0, m2_y: 0.0, co_moment: 0.0
+    };
+}
+
+fn covariance_accumulator_valid(accumulator: CovarianceAccumulatorF64) -> bool {
+    if (!finite_f64(accumulator.mean_x) || !finite_f64(accumulator.mean_y) ||
+        !finite_f64(accumulator.m2_x) || !finite_f64(accumulator.m2_y) ||
+        !finite_f64(accumulator.co_moment) || accumulator.m2_x < 0.0 || accumulator.m2_y < 0.0) { return false; }
+    if (accumulator.count == 0) {
+        return accumulator.mean_x == 0.0 && accumulator.mean_y == 0.0 &&
+               accumulator.m2_x == 0.0 && accumulator.m2_y == 0.0 && accumulator.co_moment == 0.0;
+    }
+    return true;
+}
+
+pub fn covariance_accumulator_update_f64(
+    accumulator: CovarianceAccumulatorF64, x: f64, y: f64
+) -> Result<CovarianceAccumulatorF64, DataError> {
+    if (!finite_f64(x) || !finite_f64(y)) { return Err(NonFiniteInput); }
+    if (!covariance_accumulator_valid(accumulator)) { return Err(InvalidRecord); }
+    let count: u64 = checked_count(checked_add(accumulator.count, 1))?;
+    let dx: f64 = x - accumulator.mean_x;
+    let dy: f64 = y - accumulator.mean_y;
+    let mean_x: f64 = accumulator.mean_x + dx / (count as f64);
+    let mean_y: f64 = accumulator.mean_y + dy / (count as f64);
+    let m2_x: f64 = accumulator.m2_x + dx * (x - mean_x);
+    let m2_y: f64 = accumulator.m2_y + dy * (y - mean_y);
+    let co_moment: f64 = accumulator.co_moment + dx * (y - mean_y);
+    if (!finite_f64(mean_x) || !finite_f64(mean_y) || !finite_f64(m2_x) ||
+        !finite_f64(m2_y) || !finite_f64(co_moment)) { return Err(NonFiniteResult); }
+    return Ok(CovarianceAccumulatorF64 {
+        count: count, mean_x: mean_x, mean_y: mean_y, m2_x: m2_x, m2_y: m2_y, co_moment: co_moment
+    });
+}
+
+// Chan-style merge for bivariate covariance accumulators. Merge chunks in
+// ascending chunk-index order to keep floating-point combination deterministic.
+pub fn covariance_accumulator_merge_f64(
+    a: CovarianceAccumulatorF64, b: CovarianceAccumulatorF64
+) -> Result<CovarianceAccumulatorF64, DataError> {
+    if (!covariance_accumulator_valid(a) || !covariance_accumulator_valid(b)) { return Err(InvalidRecord); }
+    if (a.count == 0) { return Ok(b); }
+    if (b.count == 0) { return Ok(a); }
+    let count: u64 = checked_count(checked_add(a.count, b.count))?;
+    let dx: f64 = b.mean_x - a.mean_x;
+    let dy: f64 = b.mean_y - a.mean_y;
+    let fraction: f64 = (b.count as f64) / (count as f64);
+    let weight: f64 = ((a.count as f64) * (b.count as f64)) / (count as f64);
+    let mean_x: f64 = a.mean_x + dx * fraction;
+    let mean_y: f64 = a.mean_y + dy * fraction;
+    let m2_x: f64 = a.m2_x + b.m2_x + dx * dx * weight;
+    let m2_y: f64 = a.m2_y + b.m2_y + dy * dy * weight;
+    let co_moment: f64 = a.co_moment + b.co_moment + dx * dy * weight;
+    if (!finite_f64(mean_x) || !finite_f64(mean_y) || !finite_f64(m2_x) ||
+        !finite_f64(m2_y) || !finite_f64(co_moment)) { return Err(NonFiniteResult); }
+    return Ok(CovarianceAccumulatorF64 {
+        count: count, mean_x: mean_x, mean_y: mean_y, m2_x: m2_x, m2_y: m2_y, co_moment: co_moment
+    });
+}
+
+pub fn covariance_accumulator_finish_f64(
+    accumulator: CovarianceAccumulatorF64
+) -> Result<CovarianceF64, DataError> {
+    if (accumulator.count == 0) { return Err(EmptyInput); }
+    if (!covariance_accumulator_valid(accumulator)) { return Err(InvalidRecord); }
+    let count_f64: f64 = accumulator.count as f64;
+    let variance_x: f64 = accumulator.m2_x / count_f64;
+    let variance_y: f64 = accumulator.m2_y / count_f64;
+    let covariance: f64 = accumulator.co_moment / count_f64;
+    let mut correlation: f64 = 0.0;
+    let mut correlation_defined: bool = false;
+    if (accumulator.m2_x > 0.0 && accumulator.m2_y > 0.0) {
+        correlation = (accumulator.co_moment / sqrt(accumulator.m2_x)) / sqrt(accumulator.m2_y);
+        if (correlation > 1.0) { correlation = 1.0; }
+        if (correlation < -1.0) { correlation = -1.0; }
+        correlation_defined = true;
+    }
+    if (!finite_f64(variance_x) || !finite_f64(variance_y) ||
+        !finite_f64(covariance) || !finite_f64(correlation)) { return Err(NonFiniteResult); }
+    return Ok(CovarianceF64 {
+        count: accumulator.count, mean_x: accumulator.mean_x, mean_y: accumulator.mean_y,
+        covariance: covariance, variance_x: variance_x, variance_y: variance_y,
+        correlation: correlation, correlation_defined: correlation_defined
+    });
+}
+
+pub fn covariance_correlation_f64(x: Span<f64>, y: Span<f64>) -> Result<CovarianceF64, DataError> {
+    if (x.len != y.len) { return Err(DimensionMismatch); }
+    if (x.len == 0) { return Err(EmptyInput); }
+    validate_finite_f64(x)?;
+    validate_finite_f64(y)?;
+    let mut accumulator: CovarianceAccumulatorF64 = covariance_accumulator_empty_f64();
+    for (i in 0..x.len) {
+        accumulator = covariance_accumulator_update_f64(accumulator, x.ptr[i], y.ptr[i])?;
+    }
+    return covariance_accumulator_finish_f64(accumulator);
+}
+
+// counts must be caller-initialised to zero. Values exactly equal to maximum
+// are assigned to the final bin; values outside the closed interval are tallied.
+pub fn histogram_f64(
+    values: Span<f64>, minimum: f64, maximum: f64, counts: Span<u64>
+) -> Result<HistogramReport, DataError> {
+    if (values.len == 0) { return Err(EmptyInput); }
+    if (!finite_f64(minimum) || !finite_f64(maximum) || maximum <= minimum || counts.len == 0) { return Err(InvalidHistogram); }
+    validate_finite_f64(values)?;
+    let mut counts_ptr: *u64 = counts.ptr;
+    for (i in 0..counts.len) { counts_ptr[i] = 0; }
+    let mut below: u64 = 0;
+    let mut above: u64 = 0;
+    let mut in_range: u64 = 0;
+    let mut interval_scale: f64 = fabs(minimum);
+    if (fabs(maximum) > interval_scale) { interval_scale = fabs(maximum); }
+    if (interval_scale == 0.0) { return Err(InvalidHistogram); }
+    let normalised_minimum: f64 = minimum / interval_scale;
+    let normalised_maximum: f64 = maximum / interval_scale;
+    let normalised_width: f64 = (normalised_maximum - normalised_minimum) / (counts.len as f64);
+    if (!finite_f64(normalised_width) || normalised_width <= 0.0) { return Err(InvalidHistogram); }
+    for (i in 0..values.len) {
+        let value: f64 = values.ptr[i];
+        if (value < minimum) { below = checked_count(checked_add(below, 1))?; }
+        else if (value > maximum) { above = checked_count(checked_add(above, 1))?; }
+        else {
+            let mut bin: u64 = 0;
+            if (value == maximum) { bin = counts.len - 1; }
+            else {
+                let normalised_value: f64 = value / interval_scale;
+                bin = ((normalised_value - normalised_minimum) / normalised_width) as u64;
+            }
+            if (bin >= counts.len) { bin = counts.len - 1; }
+            counts_ptr[bin] = checked_count(checked_add(counts_ptr[bin], 1))?;
+            in_range = checked_count(checked_add(in_range, 1))?;
+        }
+    }
+    return Ok(HistogramReport { in_range: in_range, below_range: below, above_range: above });
+}
+
 pub fn affine_transform_f64(
     input: Span<f64>, output: Span<f64>, scale: f64, offset: f64
 ) -> Result<u64, DataError> {
     if (input.len != output.len) { return Err(DimensionMismatch); }
+    if (!finite_f64(scale) || !finite_f64(offset)) { return Err(NonFiniteInput); }
+    validate_finite_f64(input)?;
     let mut output_ptr: *f64 = output.ptr;
-    parfor (i in 0..input.len) {
-        output_ptr[i] = input.ptr[i] * scale + offset;
-    }
+    parfor (i in 0..input.len) { output_ptr[i] = input.ptr[i] * scale + offset; }
+    validate_finite_result_f64(output)?;
     return Ok(input.len);
 }
 
-// Exact in-place copy is harmless; partial overlap is not supported.
 pub fn copy_f64(input: Span<f64>, output: Span<f64>) -> Result<u64, DataError> {
     if (input.len != output.len) { return Err(DimensionMismatch); }
     let mut output_ptr: *f64 = output.ptr;
@@ -97,41 +340,358 @@ pub fn copy_f64(input: Span<f64>, output: Span<f64>) -> Result<u64, DataError> {
     return Ok(input.len);
 }
 
-// Number of chunks needed to cover total elements with a fixed block size.
 pub fn chunk_count(total: u64, chunk_size: u64) -> Result<u64, DataError> {
     if (chunk_size == 0) { return Err(InvalidChunkSize); }
     let full: u64 = total / chunk_size;
     if (total % chunk_size == 0) { return Ok(full); }
-    let count: Option<u64> = checked_add(full, 1);
-    match (count) {
-        Some(value) => { return Ok(value); }
-        None => { return Err(SizeOverflow); }
-    }
+    return checked_count(checked_add(full, 1));
 }
 
 pub fn chunk_offset(chunk_index: u64, chunk_size: u64) -> Result<u64, DataError> {
     if (chunk_size == 0) { return Err(InvalidChunkSize); }
-    let offset: Option<u64> = checked_mul(chunk_index, chunk_size);
-    match (offset) {
-        Some(value) => { return Ok(value); }
-        None => { return Err(SizeOverflow); }
-    }
+    return checked_count(checked_mul(chunk_index, chunk_size));
 }
 
 pub fn chunk_length(total: u64, offset: u64, chunk_size: u64) -> Result<u64, DataError> {
     if (chunk_size == 0) { return Err(InvalidChunkSize); }
     if (offset >= total) { return Ok(0); }
     let remaining: u64 = total - offset;
-    let mut length: u64 = chunk_size;
-    if (remaining < chunk_size) { length = remaining; }
-    return Ok(length);
+    if (remaining < chunk_size) { return Ok(remaining); }
+    return Ok(chunk_size);
 }
 
-// Streaming text adapter: one finite f64 value per line. Uses a buffered
-// Reader and Welford's online algorithm; memory use is independent of file size.
-// This is a correctness/reference adapter, not the high-throughput binary path.
+// Columnar batch metadata: each column is fixed-width and contiguous in the
+// shared payload. This is a zero-copy batch descriptor, not an owning object.
+fn column_width(data_type: ColumnType) -> u64 {
+    let mut width: u64 = 8;
+    match (data_type) {
+        F64 => { width = 8; }
+        F32 => { width = 4; }
+        I64 => { width = 8; }
+        U64 => { width = 8; }
+    }
+    return width;
+}
+
+pub fn validate_record_batch(batch: RecordBatchView) -> Result<u64, DataError> {
+    if (batch.row_count == 0 || batch.columns.len == 0) { return Err(InvalidSchema); }
+    for (i in 0..batch.columns.len) {
+        let width: u64 = column_width(batch.columns.ptr[i].data_type);
+        if (batch.columns.ptr[i].byte_offset % width != 0) { return Err(InvalidSchema); }
+        let bytes: u64 = checked_count(checked_mul(batch.row_count, width))?;
+        let end: u64 = checked_count(checked_add(batch.columns.ptr[i].byte_offset, bytes))?;
+        if (end > batch.payload.len) { return Err(InvalidSchema); }
+        for (j in i + 1..batch.columns.len) {
+            let other_width: u64 = column_width(batch.columns.ptr[j].data_type);
+            let other_bytes: u64 = checked_count(checked_mul(batch.row_count, other_width))?;
+            let other_end: u64 = checked_count(checked_add(batch.columns.ptr[j].byte_offset, other_bytes))?;
+            if (batch.columns.ptr[i].byte_offset < other_end && batch.columns.ptr[j].byte_offset < end) {
+                return Err(InvalidSchema);
+            }
+        }
+    }
+    return Ok(batch.row_count);
+}
+
+fn record_column_is_f64(kind: ColumnType) -> bool {
+    let mut result: bool = false;
+    match (kind) { F64 => { result = true; } F32 => { result = false; } I64 => { result = false; } U64 => { result = false; } }
+    return result;
+}
+
+fn record_column_is_f32(kind: ColumnType) -> bool {
+    let mut result: bool = false;
+    match (kind) { F64 => { result = false; } F32 => { result = true; } I64 => { result = false; } U64 => { result = false; } }
+    return result;
+}
+
+fn record_column_is_i64(kind: ColumnType) -> bool {
+    let mut result: bool = false;
+    match (kind) { F64 => { result = false; } F32 => { result = false; } I64 => { result = true; } U64 => { result = false; } }
+    return result;
+}
+
+fn record_column_is_u64(kind: ColumnType) -> bool {
+    let mut result: bool = false;
+    match (kind) { F64 => { result = false; } F32 => { result = false; } I64 => { result = false; } U64 => { result = true; } }
+    return result;
+}
+
+// Typed record-batch accessors reinterpret the existing byte span via an
+// explicit pointer-to-pointer cast (permitted by Penstock). The returned
+// slices are views over caller-owned payload memory; no pointer/integer cast,
+// address reconstruction or payload copy is involved. validate_record_batch
+// checks each column offset and extent; callers must align the payload base
+// for the widest column type present.
+pub fn record_batch_f64_column(borrowed batch: RecordBatchView, index: u64) -> Result<Span<f64>, DataError> {
+    validate_record_batch(batch)?;
+    if (index >= batch.columns.len || !record_column_is_f64(batch.columns.ptr[index].data_type)) { return Err(InvalidSchema); }
+    let payload: Span<u8> = batch.payload;
+    let payload_pointer: *f64 = payload.ptr as *f64;
+    let typed_payload: Span<f64> = span(payload_pointer, payload.len / 8);
+    let first: u64 = batch.columns.ptr[index].byte_offset / 8;
+    let end: u64 = first + batch.row_count;
+    return Ok(typed_payload[first..end]);
+}
+
+pub fn record_batch_f32_column(borrowed batch: RecordBatchView, index: u64) -> Result<Span<f32>, DataError> {
+    validate_record_batch(batch)?;
+    if (index >= batch.columns.len || !record_column_is_f32(batch.columns.ptr[index].data_type)) { return Err(InvalidSchema); }
+    let payload: Span<u8> = batch.payload;
+    let payload_pointer: *f32 = payload.ptr as *f32;
+    let typed_payload: Span<f32> = span(payload_pointer, payload.len / 4);
+    let first: u64 = batch.columns.ptr[index].byte_offset / 4;
+    let end: u64 = first + batch.row_count;
+    return Ok(typed_payload[first..end]);
+}
+
+pub fn record_batch_i64_column(borrowed batch: RecordBatchView, index: u64) -> Result<Span<i64>, DataError> {
+    validate_record_batch(batch)?;
+    if (index >= batch.columns.len || !record_column_is_i64(batch.columns.ptr[index].data_type)) { return Err(InvalidSchema); }
+    let payload: Span<u8> = batch.payload;
+    let payload_pointer: *i64 = payload.ptr as *i64;
+    let typed_payload: Span<i64> = span(payload_pointer, payload.len / 8);
+    let first: u64 = batch.columns.ptr[index].byte_offset / 8;
+    let end: u64 = first + batch.row_count;
+    return Ok(typed_payload[first..end]);
+}
+
+pub fn record_batch_u64_column(borrowed batch: RecordBatchView, index: u64) -> Result<Span<u64>, DataError> {
+    validate_record_batch(batch)?;
+    if (index >= batch.columns.len || !record_column_is_u64(batch.columns.ptr[index].data_type)) { return Err(InvalidSchema); }
+    let payload: Span<u8> = batch.payload;
+    let payload_pointer: *u64 = payload.ptr as *u64;
+    let typed_payload: Span<u64> = span(payload_pointer, payload.len / 8);
+    let first: u64 = batch.columns.ptr[index].byte_offset / 8;
+    let end: u64 = first + batch.row_count;
+    return Ok(typed_payload[first..end]);
+}
+
+fn host_is_little_endian() -> bool {
+    let marker: u64 = 1;
+    let marker_pointer: *u64 = &marker;
+    let marker_bytes: *u8 = marker_pointer as *u8;
+    return marker_bytes[0] == 1;
+}
+
+fn file_needs_swap(order: ByteOrder) -> bool {
+    let little: bool = host_is_little_endian();
+    let mut swap: bool = false;
+    match (order) {
+        Native => { swap = false; }
+        LittleEndian => { swap = !little; }
+        BigEndian => { swap = little; }
+    }
+    return swap;
+}
+
+fn bytes_for_elements(count: u64, width: u64) -> Result<u64, DataError> {
+    match (checked_mul(count, width)) {
+        Some(value) => { return Ok(value); }
+        None => { return Err(SizeOverflow); }
+    }
+}
+
+fn swap_elements(pointer: *u8, count: u64, width: u64) {
+    let mut bytes: *u8 = pointer;
+    for (item in 0..count) {
+        for (offset in 0..(width / 2)) {
+            let left: u64 = item * width + offset;
+            let right: u64 = item * width + (width - 1 - offset);
+            let temporary: u8 = bytes[left];
+            bytes[left] = bytes[right];
+            bytes[right] = temporary;
+        }
+    }
+}
+
+fn open_binary(path: str, mode: str, order: ByteOrder, writable: bool) -> Result<BinaryFile, DataError> {
+    let path_c: *u8 = str_to_cstr(path);
+    let mode_c: *u8 = str_to_cstr(mode);
+    let handle: *void = fopen(path_c, mode_c);
+    free(path_c);
+    free(mode_c);
+    if (handle == nil) { return Err(FileOpenFailed); }
+    return Ok(BinaryFile { handle: handle, byte_order: order, writable: writable });
+}
+
+pub fn binary_open_read(path: str, order: ByteOrder) -> Result<BinaryFile, DataError> {
+    return open_binary(path, "rb", order, false);
+}
+
+pub fn binary_open_write(path: str, order: ByteOrder) -> Result<BinaryFile, DataError> {
+    return open_binary(path, "wb", order, true);
+}
+
+pub fn binary_close(borrowed mut file: BinaryFile) {
+    if (file.handle != nil) {
+        fclose(file.handle);
+        file.handle = nil;
+    }
+}
+
+pub fn binary_flush(borrowed mut file: BinaryFile) -> Result<u64, DataError> {
+    if (file.handle == nil || !file.writable) { return Err(FileWriteFailed); }
+    let result: i32 = fflush(file.handle);
+    if (result != 0) { return Err(FileWriteFailed); }
+    return Ok(0);
+}
+
+pub fn binary_read_f64(borrowed mut file: BinaryFile, output: Span<f64>) -> Result<u64, DataError> {
+    if (output.len == 0) { return Err(InvalidChunkSize); }
+    if (file.handle == nil || file.writable) { return Err(FileReadFailed); }
+    let capacity_bytes: u64 = bytes_for_elements(output.len, 8)?;
+    let byte_count: usize = fread(output.ptr as *void, 1, capacity_bytes as usize, file.handle);
+    if (ferror(file.handle) != 0) { return Err(FileReadFailed); }
+    if (byte_count % 8 != 0) { return Err(TruncatedBlock); }
+    let count: u64 = (byte_count / 8) as u64;
+    if (file_needs_swap(file.byte_order)) { swap_elements(output.ptr as *u8, count, 8); }
+    return Ok(count);
+}
+
+pub fn binary_read_f32(borrowed mut file: BinaryFile, output: Span<f32>) -> Result<u64, DataError> {
+    if (output.len == 0) { return Err(InvalidChunkSize); }
+    if (file.handle == nil || file.writable) { return Err(FileReadFailed); }
+    let capacity_bytes: u64 = bytes_for_elements(output.len, 4)?;
+    let byte_count: usize = fread(output.ptr as *void, 1, capacity_bytes as usize, file.handle);
+    if (ferror(file.handle) != 0) { return Err(FileReadFailed); }
+    if (byte_count % 4 != 0) { return Err(TruncatedBlock); }
+    let count: u64 = (byte_count / 4) as u64;
+    if (file_needs_swap(file.byte_order)) { swap_elements(output.ptr as *u8, count, 4); }
+    return Ok(count);
+}
+
+pub fn binary_read_i64(borrowed mut file: BinaryFile, output: Span<i64>) -> Result<u64, DataError> {
+    if (output.len == 0) { return Err(InvalidChunkSize); }
+    if (file.handle == nil || file.writable) { return Err(FileReadFailed); }
+    let capacity_bytes: u64 = bytes_for_elements(output.len, 8)?;
+    let byte_count: usize = fread(output.ptr as *void, 1, capacity_bytes as usize, file.handle);
+    if (ferror(file.handle) != 0) { return Err(FileReadFailed); }
+    if (byte_count % 8 != 0) { return Err(TruncatedBlock); }
+    let count: u64 = (byte_count / 8) as u64;
+    if (file_needs_swap(file.byte_order)) { swap_elements(output.ptr as *u8, count, 8); }
+    return Ok(count);
+}
+
+pub fn binary_read_u64(borrowed mut file: BinaryFile, output: Span<u64>) -> Result<u64, DataError> {
+    if (output.len == 0) { return Err(InvalidChunkSize); }
+    if (file.handle == nil || file.writable) { return Err(FileReadFailed); }
+    let capacity_bytes: u64 = bytes_for_elements(output.len, 8)?;
+    let byte_count: usize = fread(output.ptr as *void, 1, capacity_bytes as usize, file.handle);
+    if (ferror(file.handle) != 0) { return Err(FileReadFailed); }
+    if (byte_count % 8 != 0) { return Err(TruncatedBlock); }
+    let count: u64 = (byte_count / 8) as u64;
+    if (file_needs_swap(file.byte_order)) { swap_elements(output.ptr as *u8, count, 8); }
+    return Ok(count);
+}
+
+pub fn binary_write_f64(borrowed mut file: BinaryFile, input: Span<f64>, scratch: Span<f64>) -> Result<u64, DataError> {
+    if (file.handle == nil || !file.writable) { return Err(FileWriteFailed); }
+    if (scratch.len < input.len || scratch.ptr == input.ptr) { return Err(DimensionMismatch); }
+    let byte_count: u64 = bytes_for_elements(input.len, 8)?;
+    let mut scratch_ptr: *f64 = scratch.ptr;
+    parfor (i in 0..input.len) { scratch_ptr[i] = input.ptr[i]; }
+    if (file_needs_swap(file.byte_order)) { swap_elements(scratch.ptr as *u8, input.len, 8); }
+    let written: usize = fwrite(scratch.ptr as *void, 1, byte_count as usize, file.handle);
+    if ((written as u64) != byte_count) { return Err(FileWriteFailed); }
+    return Ok(input.len);
+}
+
+pub fn binary_write_f32(borrowed mut file: BinaryFile, input: Span<f32>, scratch: Span<f32>) -> Result<u64, DataError> {
+    if (file.handle == nil || !file.writable) { return Err(FileWriteFailed); }
+    if (scratch.len < input.len || scratch.ptr == input.ptr) { return Err(DimensionMismatch); }
+    let byte_count: u64 = bytes_for_elements(input.len, 4)?;
+    let mut scratch_ptr: *f32 = scratch.ptr;
+    parfor (i in 0..input.len) { scratch_ptr[i] = input.ptr[i]; }
+    if (file_needs_swap(file.byte_order)) { swap_elements(scratch.ptr as *u8, input.len, 4); }
+    let written: usize = fwrite(scratch.ptr as *void, 1, byte_count as usize, file.handle);
+    if ((written as u64) != byte_count) { return Err(FileWriteFailed); }
+    return Ok(input.len);
+}
+
+pub fn binary_write_i64(borrowed mut file: BinaryFile, input: Span<i64>, scratch: Span<i64>) -> Result<u64, DataError> {
+    if (file.handle == nil || !file.writable) { return Err(FileWriteFailed); }
+    if (scratch.len < input.len || scratch.ptr == input.ptr) { return Err(DimensionMismatch); }
+    let byte_count: u64 = bytes_for_elements(input.len, 8)?;
+    let mut scratch_ptr: *i64 = scratch.ptr;
+    parfor (i in 0..input.len) { scratch_ptr[i] = input.ptr[i]; }
+    if (file_needs_swap(file.byte_order)) { swap_elements(scratch.ptr as *u8, input.len, 8); }
+    let written: usize = fwrite(scratch.ptr as *void, 1, byte_count as usize, file.handle);
+    if ((written as u64) != byte_count) { return Err(FileWriteFailed); }
+    return Ok(input.len);
+}
+
+pub fn binary_write_u64(borrowed mut file: BinaryFile, input: Span<u64>, scratch: Span<u64>) -> Result<u64, DataError> {
+    if (file.handle == nil || !file.writable) { return Err(FileWriteFailed); }
+    if (scratch.len < input.len || scratch.ptr == input.ptr) { return Err(DimensionMismatch); }
+    let byte_count: u64 = bytes_for_elements(input.len, 8)?;
+    let mut scratch_ptr: *u64 = scratch.ptr;
+    parfor (i in 0..input.len) { scratch_ptr[i] = input.ptr[i]; }
+    if (file_needs_swap(file.byte_order)) { swap_elements(scratch.ptr as *u8, input.len, 8); }
+    let written: usize = fwrite(scratch.ptr as *void, 1, byte_count as usize, file.handle);
+    if ((written as u64) != byte_count) { return Err(FileWriteFailed); }
+    return Ok(input.len);
+}
+
+impl BinaryChunkTransformF64 for AffineTransformF64 {
+    fn transform(processor: Self, input: Span<f64>, output: Span<f64>) -> Result<u64, DataError> {
+        return affine_transform_f64(input, output, processor.scale, processor.offset);
+    }
+}
+
+// Reusable bounded-memory reader -> chunk buffer -> decode/validate ->
+// statically-dispatched transform -> numerical work -> writer pipeline.
+// All three workspaces are caller-owned and reused for every block.
+pub fn process_binary_f64_chunks<T: BinaryChunkTransformF64>(
+    processor: T, input_path: str, output_path: str, order: ByteOrder,
+    input_buffer: Span<f64>, output_buffer: Span<f64>, write_scratch: Span<f64>
+) -> Result<u64, DataError> {
+    if (input_buffer.len == 0 || output_buffer.len < input_buffer.len || write_scratch.len < input_buffer.len) { return Err(InvalidChunkSize); }
+    if (input_buffer.ptr == output_buffer.ptr || input_buffer.ptr == write_scratch.ptr || output_buffer.ptr == write_scratch.ptr) { return Err(DimensionMismatch); }
+    if (str_eq(input_path, output_path)) { return Err(InvalidRecord); }
+    let mut reader: BinaryFile = binary_open_read(input_path, order)?;
+    defer binary_close(&mut reader);
+    let mut writer: BinaryFile = binary_open_write(output_path, order)?;
+    defer binary_close(&mut writer);
+    let mut total: u64 = 0;
+    while (true) {
+        let read_count: u64 = binary_read_f64(&mut reader, input_buffer)?;
+        if (read_count == 0) { break; }
+        let input_chunk: Span<f64> = span(input_buffer.ptr, read_count);
+        let output_chunk: Span<f64> = span(output_buffer.ptr, read_count);
+        let scratch_chunk: Span<f64> = span(write_scratch.ptr, read_count);
+        validate_finite_f64(input_chunk)?;
+        let transformed: u64 = BinaryChunkTransformF64::transform(processor, input_chunk, output_chunk)?;
+        if (transformed != read_count) { return Err(DimensionMismatch); }
+        validate_finite_result_f64(output_chunk)?;
+        binary_write_f64(&mut writer, output_chunk, scratch_chunk)?;
+        total = checked_count(checked_add(total, read_count))?;
+    }
+    binary_flush(&mut writer)?;
+    return Ok(total);
+}
+
+// Convenience affine processor retained for simple file-to-file workflows.
+pub fn transform_binary_f64_file(
+    input_path: str, output_path: str, order: ByteOrder, scale: f64, offset: f64,
+    input_buffer: Span<f64>, output_buffer: Span<f64>, write_scratch: Span<f64>
+) -> Result<u64, DataError> {
+    if (!finite_f64(scale) || !finite_f64(offset)) { return Err(NonFiniteInput); }
+    let processor: AffineTransformF64 = AffineTransformF64 { scale: scale, offset: offset };
+    return process_binary_f64_chunks(processor, input_path, output_path, order,
+                                     input_buffer, output_buffer, write_scratch);
+}
+
+// Streaming text adapter: one finite f64 per line. The reader is always
+// closed, including on EOF and on early Result propagation.
 pub fn scan_f64_lines(path: str) -> Result<StatsF64, DataError> {
-    let mut reader: Reader = open_data_reader(path)?;
+    let opened: Result<Reader, IoError> = io::reader_open(path);
+    let mut reader: Reader = Reader { handle: -1 };
+    match (opened) {
+        Ok(handle) => { reader = handle; }
+        Err(error) => { return Err(Io(error)); }
+    }
+    defer io::reader_close(&mut reader);
     let mut count: u64 = 0;
     let mut mean: f64 = 0.0;
     let mut m2: f64 = 0.0;
@@ -141,33 +701,31 @@ pub fn scan_f64_lines(path: str) -> Result<StatsF64, DataError> {
         let next_line: Result<String, IoError> = io::reader_read_line(&mut reader);
         match (next_line) {
             Ok(line) => {
-                let value: f64 = parse_f64_record(str_of(&line))?;
-                // Reject NaN: x-x is NaN and therefore unequal to zero.
-                if (value - value != 0.0) { return Err(InvalidRecord); }
-                count = increment_record_count(count)?;
-                if (count == 1) {
-                    mean = value;
-                    minimum = value;
-                    maximum = value;
-                } else {
-                    let delta: f64 = value - mean;
-                    mean = mean + delta / (count as f64);
-                    let delta_after: f64 = value - mean;
-                    m2 = m2 + delta * delta_after;
-                    if (value < minimum) { minimum = value; }
-                    if (value > maximum) { maximum = value; }
+                let parsed: Result<f64, ParseError> = parse_f64(str_of(&line));
+                let mut value: f64 = 0.0;
+                match (parsed) {
+                    Ok(number) => { value = number; }
+                    Err(error) => { return Err(InvalidRecord); }
                 }
+                if (!finite_f64(value)) { return Err(InvalidRecord); }
+                count = checked_count(checked_add(count, 1))?;
+                if (count == 1) { minimum = value; maximum = value; }
+                if (value < minimum) { minimum = value; }
+                if (value > maximum) { maximum = value; }
+                let delta: f64 = value - mean;
+                mean = mean + delta / (count as f64);
+                m2 = m2 + delta * (value - mean);
+                if (!finite_f64(mean) || !finite_f64(m2)) { return Err(NonFiniteResult); }
             }
             Err(Eof) => { break; }
             Err(error) => { return Err(Io(error)); }
         }
     }
     if (count == 0) { return Err(EmptyInput); }
+    let variance: f64 = m2 / (count as f64);
+    if (!finite_f64(variance) || variance < 0.0) { return Err(NonFiniteResult); }
     return Ok(StatsF64 {
-        count: count,
-        mean: mean,
-        variance: m2 / (count as f64),
-        minimum: minimum,
-        maximum: maximum
+        count: count, mean: mean, m2: m2, variance: variance,
+        standard_deviation: sqrt(variance), minimum: minimum, maximum: maximum
     });
 }

@@ -1,0 +1,18 @@
+// Small engineering calculation demonstrating units, beam theory and 1D FEM.
+import mechanics_common;
+import units;
+import beams;
+import fem;
+import freshet_numerics;
+
+fn main() {
+    let beam: Result<BeamResponse, MechanicsError> = simply_supported_udl_f64(
+        5.0e3, 4.0, gigapascals(200.0), 8.0e-6);
+    match (beam) {
+        Ok(response) => {
+            print("max moment [N m] = "); print_f64(response.maximum_moment_nm, 3); println();
+            print("max deflection [m] = "); print_f64(response.maximum_deflection_m, 9); println();
+        }
+        Err(error) => { print("beam calculation failed"); println(); }
+    }
+}

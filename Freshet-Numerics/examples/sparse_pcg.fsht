@@ -1,0 +1,42 @@
+// COO assembly -> CSR -> Jacobi-preconditioned CG.
+import freshet_numerics;
+
+fn main() {
+    // Symmetric positive-definite tridiagonal matrix:
+    // [ 4 -1  0 ] [x0]   [ 2 ]
+    // [-1  4 -1 ] [x1] = [ 4 ]
+    // [ 0 -1  3 ] [x2]   [ 7 ]
+    let rows: [u64; 7] = [0, 0, 1, 1, 1, 2, 2];
+    let cols: [u64; 7] = [0, 1, 0, 1, 2, 1, 2];
+    let values: [f64; 7] = [4.0, -1.0, -1.0, 4.0, -1.0, -1.0, 3.0];
+    let mut offsets: [u64; 4] = [0, 0, 0, 0];
+    let mut csr_cols: [u64; 7] = [0, 0, 0, 0, 0, 0, 0];
+    let mut csr_values: [f64; 7] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut cursor: [u64; 3] = [0, 0, 0];
+    let assembled: Result<u64, NumericsError> = coo_to_csr_f64(
+        3, 3, span(rows), span(cols), span(values), span(offsets), span(csr_cols), span(csr_values), span(cursor));
+    match (assembled) { Ok(n) => { print("nnz="); print_u64(n); println(); } Err(error) => { print("assembly failed"); println(); return; } }
+    let matrix: CSRMatrixF64 = CSRMatrixF64 {
+        rows: 3, cols: 3, nnz: 7, row_offsets: span(offsets), col_indices: span(csr_cols), values: span(csr_values)
+    };
+    let mut inverse_diagonal: [f64; 3] = [0.0, 0.0, 0.0];
+    let diagonal: Result<u64, NumericsError> = csr_inverse_diagonal_f64(matrix, span(inverse_diagonal));
+    match (diagonal) { Ok(n) => {} Err(error) => { print("preconditioner failed"); println(); return; } }
+    let preconditioner: JacobiPreconditionerF64 = JacobiPreconditionerF64 { inverse_diagonal: span(inverse_diagonal) };
+    let b: [f64; 3] = [2.0, 4.0, 7.0];
+    let mut x: [f64; 3] = [0.0, 0.0, 0.0];
+    let mut r: [f64; 3] = [0.0, 0.0, 0.0];
+    let mut z: [f64; 3] = [0.0, 0.0, 0.0];
+    let mut direction: [f64; 3] = [0.0, 0.0, 0.0];
+    let mut product: [f64; 3] = [0.0, 0.0, 0.0];
+    let solved: Result<CGReport, NumericsError> = preconditioned_conjugate_gradient_f64(
+        matrix, preconditioner, 3, span(b), span(x), span(r), span(z), span(direction), span(product), 100, 1.0e-12);
+    match (solved) {
+        Ok(report) => {
+            print("converged="); if (report.converged) { print("true"); } else { print("false"); }
+            print(" residual="); print_f64(report.residual_norm, 12); println();
+            for (i in 0..3) { print_f64(x[i], 8); print(" "); } println();
+        }
+        Err(error) => { print("solver failed"); println(); }
+    }
+}

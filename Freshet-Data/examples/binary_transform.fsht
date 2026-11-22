@@ -1,0 +1,17 @@
+// Bounded-memory binary transform. Input and output buffers are reused for
+// every block; file handles are closed inside the pipeline on every exit path.
+import freshet_data;
+
+fn main() {
+    let input: *f64 = malloc(f64, 4096);
+    let output: *f64 = malloc(f64, 4096);
+    let scratch: *f64 = malloc(f64, 4096);
+    defer free(input); defer free(output); defer free(scratch);
+    let result: Result<u64, DataError> = transform_binary_f64_file(
+        "input.f64", "output.f64", LittleEndian, 1.5, 2.0,
+        span(input, 4096), span(output, 4096), span(scratch, 4096));
+    match (result) {
+        Ok(count) => { print("processed values="); print_u64(count); println(); }
+        Err(error) => { print("binary transform failed"); println(); }
+    }
+}

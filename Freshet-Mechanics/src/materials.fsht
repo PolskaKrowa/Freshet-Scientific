@@ -1,0 +1,48 @@
+module materials;
+import mechanics_common;
+
+pub struct IsotropicMaterial {
+    young_modulus_pa: f64,
+    poisson_ratio: f64,
+    density_kg_m3: f64,
+    yield_strength_pa: f64
+}
+
+fn validate_isotropic_material(material: IsotropicMaterial) -> Result<u64, MechanicsError> {
+    if (!mechanics_finite_f64(material.young_modulus_pa) ||
+        !mechanics_finite_f64(material.poisson_ratio) ||
+        !mechanics_finite_f64(material.density_kg_m3) ||
+        !mechanics_finite_f64(material.yield_strength_pa)) { return Err(MechanicsError.MechanicsNonFiniteInput); }
+    if (material.young_modulus_pa <= 0.0 || material.poisson_ratio <= -1.0 ||
+        material.poisson_ratio >= 0.5 || material.density_kg_m3 < 0.0 ||
+        material.yield_strength_pa <= 0.0) { return Err(MechanicsError.InvalidMaterial); }
+    return Ok(1);
+}
+
+pub fn isotropic_material(
+    young_modulus_pa: f64, poisson_ratio: f64, density_kg_m3: f64, yield_strength_pa: f64
+) -> Result<IsotropicMaterial, MechanicsError> {
+    let candidate: IsotropicMaterial = IsotropicMaterial {
+        young_modulus_pa: young_modulus_pa, poisson_ratio: poisson_ratio,
+        density_kg_m3: density_kg_m3, yield_strength_pa: yield_strength_pa
+    };
+    validate_isotropic_material(candidate)?;
+    return Ok(IsotropicMaterial {
+        young_modulus_pa: young_modulus_pa, poisson_ratio: poisson_ratio,
+        density_kg_m3: density_kg_m3, yield_strength_pa: yield_strength_pa
+    });
+}
+
+pub fn shear_modulus_pa(material: IsotropicMaterial) -> Result<f64, MechanicsError> {
+    validate_isotropic_material(material)?;
+    let value: f64 = material.young_modulus_pa / (2.0 * (1.0 + material.poisson_ratio));
+    if (!mechanics_finite_f64(value)) { return Err(MechanicsError.MechanicsNonFiniteResult); }
+    return Ok(value);
+}
+
+pub fn bulk_modulus_pa(material: IsotropicMaterial) -> Result<f64, MechanicsError> {
+    validate_isotropic_material(material)?;
+    let value: f64 = material.young_modulus_pa / (3.0 * (1.0 - 2.0 * material.poisson_ratio));
+    if (!mechanics_finite_f64(value)) { return Err(MechanicsError.MechanicsNonFiniteResult); }
+    return Ok(value);
+}

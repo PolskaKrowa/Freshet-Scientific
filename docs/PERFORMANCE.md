@@ -29,6 +29,7 @@ A performance change should include:
    the single best run.
 5. A checksum or residual check so faster wrong answers are rejected.
 
-The initial benchmark harness is deliberately a placeholder until the three
-sub-libraries have stable, representative workloads. No benchmark claims are
-made by this release.
+This release establishes representative correctness workloads across all four
+sub-libraries, but does not yet publish performance benchmark results. The
+performance harness and measurement baselines are scheduled for the next
+release; no throughput or scaling claim is made by this release.

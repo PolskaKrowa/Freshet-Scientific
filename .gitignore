@@ -10,3 +10,8 @@ libfreshet_*.a
 CMakeFiles/
 CMakeCache.txt
 Testing/
+
+# Freshet-Data test fixtures
+data_*_test.bin
+data_transform_*.bin
+data_lines_test.txt
