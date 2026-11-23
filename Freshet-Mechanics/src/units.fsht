@@ -4,13 +4,8 @@ import mechanics_common;
 // Seven SI base dimensions in order: length, mass, time, electric current,
 // thermodynamic temperature, amount of substance, luminous intensity.
 pub struct QuantitySI {
-    value: f64,
-    length_power: i32,
-    mass_power: i32,
-    time_power: i32,
-    current_power: i32,
-    temperature_power: i32,
-    amount_power: i32,
+    value: f64, length_power: i32, mass_power: i32, time_power: i32,
+    current_power: i32, temperature_power: i32, amount_power: i32,
     luminous_intensity_power: i32
 }
 
@@ -42,12 +37,19 @@ pub fn quantity_si(
     });
 }
 
-pub fn quantity_add_si(a: QuantitySI, b: QuantitySI) -> Result<QuantitySI, MechanicsError> {
-    if (!mechanics_finite_f64(a.value) || !mechanics_finite_f64(b.value)) { return Err(MechanicsNonFiniteInput); }
+pub fn quantity_add_si(
+    a: QuantitySI, b: QuantitySI
+) -> Result<QuantitySI, MechanicsError> {
+    if (!mechanics_finite_f64(a.value) || !mechanics_finite_f64(b.value)) {
+        return Err(MechanicsNonFiniteInput);
+    }
+
     if (a.length_power != b.length_power || a.mass_power != b.mass_power ||
         a.time_power != b.time_power || a.current_power != b.current_power ||
-        a.temperature_power != b.temperature_power || a.amount_power != b.amount_power ||
-        a.luminous_intensity_power != b.luminous_intensity_power) { return Err(MechanicsDimensionMismatch); }
+        a.temperature_power != b.temperature_power || a.amount_power !=
+        b.amount_power || a.luminous_intensity_power !=
+        b.luminous_intensity_power) { return Err(MechanicsDimensionMismatch); }
+
     let value: f64 = a.value + b.value;
     if (!mechanics_finite_f64(value)) { return Err(MechanicsNonFiniteResult); }
     return Ok(QuantitySI {
@@ -58,12 +60,19 @@ pub fn quantity_add_si(a: QuantitySI, b: QuantitySI) -> Result<QuantitySI, Mecha
     });
 }
 
-pub fn quantity_subtract_si(a: QuantitySI, b: QuantitySI) -> Result<QuantitySI, MechanicsError> {
-    if (!mechanics_finite_f64(a.value) || !mechanics_finite_f64(b.value)) { return Err(MechanicsNonFiniteInput); }
+pub fn quantity_subtract_si(
+    a: QuantitySI, b: QuantitySI
+) -> Result<QuantitySI, MechanicsError> {
+    if (!mechanics_finite_f64(a.value) || !mechanics_finite_f64(b.value)) {
+        return Err(MechanicsNonFiniteInput);
+    }
+
     if (a.length_power != b.length_power || a.mass_power != b.mass_power ||
         a.time_power != b.time_power || a.current_power != b.current_power ||
-        a.temperature_power != b.temperature_power || a.amount_power != b.amount_power ||
-        a.luminous_intensity_power != b.luminous_intensity_power) { return Err(MechanicsDimensionMismatch); }
+        a.temperature_power != b.temperature_power || a.amount_power !=
+        b.amount_power || a.luminous_intensity_power !=
+        b.luminous_intensity_power) { return Err(MechanicsDimensionMismatch); }
+
     let value: f64 = a.value - b.value;
     if (!mechanics_finite_f64(value)) { return Err(MechanicsNonFiniteResult); }
     return Ok(QuantitySI {
@@ -74,15 +83,25 @@ pub fn quantity_subtract_si(a: QuantitySI, b: QuantitySI) -> Result<QuantitySI, 
     });
 }
 
-pub fn quantity_multiply_si(a: QuantitySI, b: QuantitySI) -> Result<QuantitySI, MechanicsError> {
-    if (!mechanics_finite_f64(a.value) || !mechanics_finite_f64(b.value)) { return Err(MechanicsNonFiniteInput); }
-    let length_power: i32 = checked_exponent_add(a.length_power, b.length_power)?;
+pub fn quantity_multiply_si(
+    a: QuantitySI, b: QuantitySI
+) -> Result<QuantitySI, MechanicsError> {
+    if (!mechanics_finite_f64(a.value) || !mechanics_finite_f64(b.value)) {
+        return Err(MechanicsNonFiniteInput);
+    }
+
+    let length_power: i32 = checked_exponent_add(
+            a.length_power, b.length_power)?;
     let mass_power: i32 = checked_exponent_add(a.mass_power, b.mass_power)?;
     let time_power: i32 = checked_exponent_add(a.time_power, b.time_power)?;
-    let current_power: i32 = checked_exponent_add(a.current_power, b.current_power)?;
-    let temperature_power: i32 = checked_exponent_add(a.temperature_power, b.temperature_power)?;
-    let amount_power: i32 = checked_exponent_add(a.amount_power, b.amount_power)?;
-    let luminous_intensity_power: i32 = checked_exponent_add(a.luminous_intensity_power, b.luminous_intensity_power)?;
+    let current_power: i32 = checked_exponent_add(
+            a.current_power, b.current_power)?;
+    let temperature_power: i32 = checked_exponent_add(
+            a.temperature_power, b.temperature_power)?;
+    let amount_power: i32 = checked_exponent_add(
+            a.amount_power, b.amount_power)?;
+    let luminous_intensity_power: i32 = checked_exponent_add(
+            a.luminous_intensity_power, b.luminous_intensity_power)?;
     let value: f64 = a.value * b.value;
     if (!mechanics_finite_f64(value)) { return Err(MechanicsNonFiniteResult); }
     return Ok(QuantitySI {
@@ -93,16 +112,28 @@ pub fn quantity_multiply_si(a: QuantitySI, b: QuantitySI) -> Result<QuantitySI, 
     });
 }
 
-pub fn quantity_divide_si(a: QuantitySI, b: QuantitySI) -> Result<QuantitySI, MechanicsError> {
-    if (!mechanics_finite_f64(a.value) || !mechanics_finite_f64(b.value)) { return Err(MechanicsNonFiniteInput); }
+pub fn quantity_divide_si(
+    a: QuantitySI, b: QuantitySI
+) -> Result<QuantitySI, MechanicsError> {
+    if (!mechanics_finite_f64(a.value) || !mechanics_finite_f64(b.value)) {
+        return Err(MechanicsNonFiniteInput);
+    }
+
     if (b.value == 0.0) { return Err(InvalidGeometry); }
-    let length_power: i32 = checked_exponent_subtract(a.length_power, b.length_power)?;
-    let mass_power: i32 = checked_exponent_subtract(a.mass_power, b.mass_power)?;
-    let time_power: i32 = checked_exponent_subtract(a.time_power, b.time_power)?;
-    let current_power: i32 = checked_exponent_subtract(a.current_power, b.current_power)?;
-    let temperature_power: i32 = checked_exponent_subtract(a.temperature_power, b.temperature_power)?;
-    let amount_power: i32 = checked_exponent_subtract(a.amount_power, b.amount_power)?;
-    let luminous_intensity_power: i32 = checked_exponent_subtract(a.luminous_intensity_power, b.luminous_intensity_power)?;
+    let length_power: i32 = checked_exponent_subtract(
+            a.length_power, b.length_power)?;
+    let mass_power: i32 = checked_exponent_subtract(
+            a.mass_power, b.mass_power)?;
+    let time_power: i32 = checked_exponent_subtract(
+            a.time_power, b.time_power)?;
+    let current_power: i32 = checked_exponent_subtract(
+            a.current_power, b.current_power)?;
+    let temperature_power: i32 = checked_exponent_subtract(
+            a.temperature_power, b.temperature_power)?;
+    let amount_power: i32 = checked_exponent_subtract(
+            a.amount_power, b.amount_power)?;
+    let luminous_intensity_power: i32 = checked_exponent_subtract(
+            a.luminous_intensity_power, b.luminous_intensity_power)?;
     let value: f64 = a.value / b.value;
     if (!mechanics_finite_f64(value)) { return Err(MechanicsNonFiniteResult); }
     return Ok(QuantitySI {
@@ -114,14 +145,46 @@ pub fn quantity_divide_si(a: QuantitySI, b: QuantitySI) -> Result<QuantitySI, Me
 }
 
 // Convenient SI input conversions. Values returned are in base SI units.
-pub fn millimetres(value: f64) -> f64 { return value * 1.0e-3; }
-pub fn centimetres(value: f64) -> f64 { return value * 1.0e-2; }
-pub fn kilometres(value: f64) -> f64 { return value * 1.0e3; }
-pub fn grams(value: f64) -> f64 { return value * 1.0e-3; }
-pub fn kilonewtons(value: f64) -> f64 { return value * 1.0e3; }
-pub fn kilopascals(value: f64) -> f64 { return value * 1.0e3; }
-pub fn megapascals(value: f64) -> f64 { return value * 1.0e6; }
-pub fn gigapascals(value: f64) -> f64 { return value * 1.0e9; }
-pub fn milliamperes(value: f64) -> f64 { return value * 1.0e-3; }
-pub fn microamperes(value: f64) -> f64 { return value * 1.0e-6; }
-pub fn millimoles(value: f64) -> f64 { return value * 1.0e-3; }
+pub fn millimetres(value: f64) -> f64 {
+    return value * 1.0e-3;
+}
+
+pub fn centimetres(value: f64) -> f64 {
+    return value * 1.0e-2;
+}
+
+pub fn kilometres(value: f64) -> f64 {
+    return value * 1.0e3;
+}
+
+pub fn grams(value: f64) -> f64 {
+    return value * 1.0e-3;
+}
+
+pub fn kilonewtons(value: f64) -> f64 {
+    return value * 1.0e3;
+}
+
+pub fn kilopascals(value: f64) -> f64 {
+    return value * 1.0e3;
+}
+
+pub fn megapascals(value: f64) -> f64 {
+    return value * 1.0e6;
+}
+
+pub fn gigapascals(value: f64) -> f64 {
+    return value * 1.0e9;
+}
+
+pub fn milliamperes(value: f64) -> f64 {
+    return value * 1.0e-3;
+}
+
+pub fn microamperes(value: f64) -> f64 {
+    return value * 1.0e-6;
+}
+
+pub fn millimoles(value: f64) -> f64 {
+    return value * 1.0e-3;
+}

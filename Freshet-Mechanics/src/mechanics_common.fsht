@@ -1,15 +1,9 @@
 module mechanics_common;
 
 pub enum MechanicsError {
-    MechanicsInvalidDimension,
-    MechanicsDimensionMismatch,
-    InvalidMaterial,
-    InvalidGeometry,
-    MechanicsNonFiniteInput,
-    MechanicsNonFiniteResult,
-    MechanicsSizeOverflow,
-    LinearSolverFailed,
-    SingularSystem
+    MechanicsInvalidDimension, MechanicsDimensionMismatch, InvalidMaterial,
+    InvalidGeometry, MechanicsNonFiniteInput, MechanicsNonFiniteResult,
+    MechanicsSizeOverflow, LinearSolverFailed, SingularSystem
 }
 
 pub fn mechanics_finite_f64(value: f64) -> bool {

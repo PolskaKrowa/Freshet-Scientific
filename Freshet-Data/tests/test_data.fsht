@@ -3,8 +3,10 @@ import freshet_data;
 import fdo_format;
 
 @test fn welford_statistics_and_standard_deviation_are_correct() {
-    let values: [f64; 4] = [1.0, 2.0, 3.0, 4.0];
+    let values: [f64;
+    4] = [1.0, 2.0, 3.0, 4.0];
     let result: Result<StatsF64, DataError> = statistics_f64(span(values));
+
     match (result) {
         Ok(stats) => {
             assert(stats.count == 4);
@@ -13,59 +15,116 @@ import fdo_format;
             assert(fabs(stats.standard_deviation - sqrt(1.25)) < 1.0e-12);
             assert(stats.minimum == 1.0 && stats.maximum == 4.0);
         }
+
         Err(error) => { assert(false); }
     }
 }
 
 @test fn chan_merge_matches_single_pass_statistics() {
-    let first: [f64; 2] = [1.0, 2.0];
-    let second: [f64; 2] = [3.0, 4.0];
+    let first: [f64;
+    2] = [1.0, 2.0];
+    let second: [f64;
+    2] = [3.0, 4.0];
     let a: Result<StatsF64, DataError> = statistics_f64(span(first));
     let b: Result<StatsF64, DataError> = statistics_f64(span(second));
-    let mut merged_a: StatsF64 = StatsF64 { count: 1, mean: 0.0, m2: 0.0, variance: 0.0, standard_deviation: 0.0, minimum: 0.0, maximum: 0.0 };
-    let mut merged_b: StatsF64 = StatsF64 { count: 1, mean: 0.0, m2: 0.0, variance: 0.0, standard_deviation: 0.0, minimum: 0.0, maximum: 0.0 };
-    match (a) { Ok(value) => { merged_a = value; } Err(error) => { assert(false); } }
-    match (b) { Ok(value) => { merged_b = value; } Err(error) => { assert(false); } }
-    let merged: Result<StatsF64, DataError> = statistics_merge_f64(merged_a, merged_b);
+
+    let mut merged_a: StatsF64 = StatsF64 {
+        count: 1, mean: 0.0, m2: 0.0, variance: 0.0, standard_deviation: 0.0,
+        minimum: 0.0, maximum: 0.0
+    };
+
+    let mut merged_b: StatsF64 = StatsF64 {
+        count: 1, mean: 0.0, m2: 0.0, variance: 0.0, standard_deviation: 0.0,
+        minimum: 0.0, maximum: 0.0
+    };
+
+    match (a) {
+        Ok(value) => { merged_a = value; }
+        Err(error) => { assert(false); }
+    }
+
+    match (b) {
+        Ok(value) => { merged_b = value; }
+        Err(error) => { assert(false); }
+    }
+
+    let merged: Result<StatsF64, DataError> = statistics_merge_f64(
+            merged_a, merged_b);
+
     match (merged) {
-        Ok(stats) => { assert(fabs(stats.mean - 2.5) < 1.0e-12); assert(fabs(stats.variance - 1.25) < 1.0e-12); }
+        Ok(stats) => {
+            assert(fabs(stats.mean - 2.5) < 1.0e-12);
+            assert(fabs(stats.variance - 1.25) < 1.0e-12);
+        }
+
         Err(error) => { assert(false); }
     }
 }
 
 @test fn covariance_and_correlation_are_correct() {
-    let x: [f64; 3] = [1.0, 2.0, 3.0];
-    let y: [f64; 3] = [2.0, 4.0, 6.0];
-    let result: Result<CovarianceF64, DataError> = covariance_correlation_f64(span(x), span(y));
+    let x: [f64;
+    3] = [1.0, 2.0, 3.0];
+    let y: [f64;
+    3] = [2.0, 4.0, 6.0];
+    let result: Result<CovarianceF64, DataError> = covariance_correlation_f64(
+            span(x), span(y));
+
     match (result) {
-        Ok(stats) => { assert(fabs(stats.covariance - (4.0 / 3.0)) < 1.0e-12); assert(stats.correlation_defined); assert(fabs(stats.correlation - 1.0) < 1.0e-12); }
+        Ok(stats) => {
+            assert(fabs(stats.covariance - (4.0 / 3.0)) < 1.0e-12);
+            assert(stats.correlation_defined);
+            assert(fabs(stats.correlation - 1.0) < 1.0e-12);
+        }
+
         Err(error) => { assert(false); }
     }
 }
 
 @test fn histogram_accounts_for_edges_and_outliers() {
-    let values: [f64; 6] = [-1.0, 0.0, 0.5, 1.0, 2.0, 3.0];
-    let mut counts: [u64; 2] = [0, 0];
-    let result: Result<HistogramReport, DataError> = histogram_f64(span(values), 0.0, 2.0, span(counts));
+    let values: [f64;
+    6] = [-1.0, 0.0, 0.5, 1.0, 2.0, 3.0];
+    let mut counts: [u64;
+    2] = [0, 0];
+    let result: Result<HistogramReport, DataError> = histogram_f64(
+            span(values), 0.0, 2.0, span(counts));
+
     match (result) {
-        Ok(report) => { assert(report.below_range == 1); assert(report.above_range == 1); assert(report.in_range == 4); }
+        Ok(report) => {
+            assert(report.below_range == 1);
+            assert(report.above_range == 1);
+            assert(report.in_range == 4);
+        }
+
         Err(error) => { assert(false); }
     }
+
     assert(counts[0] == 2 && counts[1] == 2);
 }
 
 @test fn histogram_handles_finite_extreme_endpoints_without_range_overflow() {
-    let values: [f64; 5] = [-1.0e308, -0.5e308, 0.0, 0.5e308, 1.0e308];
-    let mut counts: [u64; 4] = [0, 0, 0, 0];
-    let result: Result<HistogramReport, DataError> = histogram_f64(span(values), -1.0e308, 1.0e308, span(counts));
-    match (result) { Ok(report) => { assert(report.in_range == 5); } Err(error) => { assert(false); } }
+    let values: [f64;
+    5] = [-1.0e308, -0.5e308, 0.0, 0.5e308, 1.0e308];
+    let mut counts: [u64;
+    4] = [0, 0, 0, 0];
+    let result: Result<HistogramReport, DataError> = histogram_f64(
+            span(values), -1.0e308, 1.0e308, span(counts));
+
+    match (result) {
+        Ok(report) => { assert(report.in_range == 5); }
+        Err(error) => { assert(false); }
+    }
+
     assert(counts[0] == 1 && counts[1] == 1 && counts[2] == 1 && counts[3] == 2);
 }
 
 @test fn zero_variance_covariance_marks_correlation_undefined() {
-    let x: [f64; 3] = [2.0, 2.0, 2.0];
-    let y: [f64; 3] = [1.0, 2.0, 3.0];
-    let result: Result<CovarianceF64, DataError> = covariance_correlation_f64(span(x), span(y));
+    let x: [f64;
+    3] = [2.0, 2.0, 2.0];
+    let y: [f64;
+    3] = [1.0, 2.0, 3.0];
+    let result: Result<CovarianceF64, DataError> = covariance_correlation_f64(
+            span(x), span(y));
+
     match (result) {
         Ok(stats) => { assert(!stats.correlation_defined); }
         Err(error) => { assert(false); }
@@ -73,163 +132,418 @@ import fdo_format;
 }
 
 @test fn affine_transform_is_elementwise() {
-    let input: [f64; 3] = [1.0, 2.0, 3.0];
-    let mut output: [f64; 3] = [0.0, 0.0, 0.0];
-    let result: Result<u64, DataError> = affine_transform_f64(span(input), span(output), 2.0, 1.0);
-    match (result) { Ok(count) => { assert(count == 3); } Err(error) => { assert(false); } }
+    let input: [f64;
+    3] = [1.0, 2.0, 3.0];
+    let mut output: [f64;
+    3] = [0.0, 0.0, 0.0];
+    let result: Result<u64, DataError> = affine_transform_f64(
+            span(input), span(output), 2.0, 1.0);
+
+    match (result) {
+        Ok(count) => { assert(count == 3); }
+        Err(error) => { assert(false); }
+    }
+
     assert(output[0] == 3.0 && output[1] == 5.0 && output[2] == 7.0);
 }
 
 @test fn finite_validation_rejects_infinity_and_nan() {
     let infinity: f64 = 1.0e308 * 1.0e308;
-    let values: [f64; 2] = [1.0, infinity];
+    let values: [f64;
+    2] = [1.0, infinity];
     let result: Result<StatsF64, DataError> = statistics_f64(span(values));
-    match (result) { Ok(stats) => { assert(false); } Err(NonFiniteInput) => { assert(true); } Err(error) => { assert(false); } }
+
+    match (result) {
+        Ok(stats) => { assert(false); }
+        Err(NonFiniteInput) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn chunk_planning_covers_tail() {
     let count: Result<u64, DataError> = chunk_count(1001, 256);
-    match (count) { Ok(value) => { assert(value == 4); } Err(error) => { assert(false); } }
+
+    match (count) {
+        Ok(value) => { assert(value == 4); }
+        Err(error) => { assert(false); }
+    }
+
     let offset: Result<u64, DataError> = chunk_offset(3, 256);
-    match (offset) { Ok(value) => { assert(value == 768); } Err(error) => { assert(false); } }
+
+    match (offset) {
+        Ok(value) => { assert(value == 768); }
+        Err(error) => { assert(false); }
+    }
+
     let length: Result<u64, DataError> = chunk_length(1001, 768, 256);
-    match (length) { Ok(value) => { assert(value == 233); } Err(error) => { assert(false); } }
+
+    match (length) {
+        Ok(value) => { assert(value == 233); }
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn binary_blocks_round_trip_with_explicit_byte_order() {
-    let input: [f64; 3] = [1.25, -2.5, 9.0];
-    let mut scratch: [f64; 3] = [0.0, 0.0, 0.0];
-    let mut output: [f64; 3] = [0.0, 0.0, 0.0];
+    let input: [f64;
+    3] = [1.25, -2.5, 9.0];
+    let mut scratch: [f64;
+    3] = [0.0, 0.0, 0.0];
+    let mut output: [f64;
+    3] = [0.0, 0.0, 0.0];
     // Closes are deferred exactly once per handle: a `borrowed mut` close
     // cannot invalidate the caller's copy of the handle, so an explicit
     // close followed by the deferred close would fclose the same handle
     // twice. Flush explicitly instead when data must be visible on disk
     // before the deferred close fires.
-    let opened_writer: Result<BinaryFile, DataError> = binary_open_write("data_binary_test.bin", BigEndian);
-    let mut writer: BinaryFile = BinaryFile { handle: nil, byte_order: BigEndian, writable: true };
-    match (opened_writer) { Ok(file) => { writer = file; } Err(error) => { assert(false); } }
+    let opened_writer: Result<BinaryFile, DataError> = binary_open_write(
+            "data_binary_test.bin", BigEndian);
+
+    let mut writer: BinaryFile = BinaryFile {
+        handle: nil, byte_order: BigEndian, writable: true
+    };
+
+    match (opened_writer) {
+        Ok(file) => { writer = file; }
+        Err(error) => { assert(false); }
+    }
+
     defer binary_close(&mut writer);
-    let wrote: Result<u64, DataError> = binary_write_f64(&mut writer, span(input), span(scratch));
-    match (wrote) { Ok(count) => { assert(count == 3); } Err(error) => { assert(false); } }
+    let wrote: Result<u64, DataError> = binary_write_f64(
+            &mut writer, span(input), span(scratch));
+
+    match (wrote) {
+        Ok(count) => { assert(count == 3); }
+        Err(error) => { assert(false); }
+    }
+
     let flushed: Result<u64, DataError> = binary_flush(&mut writer);
-    match (flushed) { Ok(n) => { assert(n == 0); } Err(error) => { assert(false); } }
-    let opened_reader: Result<BinaryFile, DataError> = binary_open_read("data_binary_test.bin", BigEndian);
-    let mut reader: BinaryFile = BinaryFile { handle: nil, byte_order: BigEndian, writable: false };
-    match (opened_reader) { Ok(file) => { reader = file; } Err(error) => { assert(false); } }
+
+    match (flushed) {
+        Ok(n) => { assert(n == 0); }
+        Err(error) => { assert(false); }
+    }
+
+    let opened_reader: Result<BinaryFile, DataError> = binary_open_read(
+            "data_binary_test.bin", BigEndian);
+
+    let mut reader: BinaryFile = BinaryFile {
+        handle: nil, byte_order: BigEndian, writable: false
+    };
+
+    match (opened_reader) {
+        Ok(file) => { reader = file; }
+        Err(error) => { assert(false); }
+    }
+
     defer binary_close(&mut reader);
-    let read: Result<u64, DataError> = binary_read_f64(&mut reader, span(output));
-    match (read) { Ok(count) => { assert(count == 3); } Err(error) => { assert(false); } }
-    assert(output[0] == input[0] && output[1] == input[1] && output[2] == input[2]);
+    let read: Result<u64, DataError> = binary_read_f64(
+            &mut reader, span(output));
+
+    match (read) {
+        Ok(count) => { assert(count == 3); }
+        Err(error) => { assert(false); }
+    }
+
+    assert(output[0] == input[0] && output[1] == input[1] && output[2] ==
+        input[2]);
     io::remove("data_binary_test.bin");
 }
 
 @test fn covariance_accumulators_merge_by_chunk() {
     let mut a: CovarianceAccumulatorF64 = covariance_accumulator_empty_f64();
     let mut b: CovarianceAccumulatorF64 = covariance_accumulator_empty_f64();
-    let a1: Result<CovarianceAccumulatorF64, DataError> = covariance_accumulator_update_f64(a, 1.0, 2.0);
-    match (a1) { Ok(value) => { a = value; } Err(error) => { assert(false); } }
-    let a2: Result<CovarianceAccumulatorF64, DataError> = covariance_accumulator_update_f64(a, 2.0, 4.0);
-    match (a2) { Ok(value) => { a = value; } Err(error) => { assert(false); } }
-    let b1: Result<CovarianceAccumulatorF64, DataError> = covariance_accumulator_update_f64(b, 3.0, 6.0);
-    match (b1) { Ok(value) => { b = value; } Err(error) => { assert(false); } }
-    let b2: Result<CovarianceAccumulatorF64, DataError> = covariance_accumulator_update_f64(b, 4.0, 8.0);
-    match (b2) { Ok(value) => { b = value; } Err(error) => { assert(false); } }
-    let merged: Result<CovarianceAccumulatorF64, DataError> = covariance_accumulator_merge_f64(a, b);
+    let a1: Result<CovarianceAccumulatorF64, DataError> =
+        covariance_accumulator_update_f64(a, 1.0, 2.0);
+
+    match (a1) {
+        Ok(value) => { a = value; }
+        Err(error) => { assert(false); }
+    }
+
+    let a2: Result<CovarianceAccumulatorF64, DataError> =
+        covariance_accumulator_update_f64(a, 2.0, 4.0);
+
+    match (a2) {
+        Ok(value) => { a = value; }
+        Err(error) => { assert(false); }
+    }
+
+    let b1: Result<CovarianceAccumulatorF64, DataError> =
+        covariance_accumulator_update_f64(b, 3.0, 6.0);
+
+    match (b1) {
+        Ok(value) => { b = value; }
+        Err(error) => { assert(false); }
+    }
+
+    let b2: Result<CovarianceAccumulatorF64, DataError> =
+        covariance_accumulator_update_f64(b, 4.0, 8.0);
+
+    match (b2) {
+        Ok(value) => { b = value; }
+        Err(error) => { assert(false); }
+    }
+
+    let merged: Result<CovarianceAccumulatorF64, DataError> =
+        covariance_accumulator_merge_f64(a, b);
+
     match (merged) {
         Ok(accumulator) => {
-            let report: Result<CovarianceF64, DataError> = covariance_accumulator_finish_f64(accumulator);
-            match (report) { Ok(stats) => { assert(stats.correlation_defined); assert(fabs(stats.correlation - 1.0) < 1.0e-12); assert(fabs(stats.covariance - 2.5) < 1.0e-12); } Err(error) => { assert(false); } }
+            let report: Result<CovarianceF64, DataError> =
+                covariance_accumulator_finish_f64(accumulator);
+            match (report) {
+                Ok(stats) => {
+                    assert(stats.correlation_defined);
+                    assert(fabs(stats.correlation - 1.0) < 1.0e-12);
+                    assert(fabs(stats.covariance - 2.5) < 1.0e-12);
+                }
+
+                Err(error) => { assert(false); }
+            }
         }
+
         Err(error) => { assert(false); }
     }
 }
 
 @test fn welford_detects_finite_input_intermediate_overflow() {
-    let values: [f64; 2] = [1.0e308, -1.0e308];
+    let values: [f64;
+    2] = [1.0e308, -1.0e308];
     let result: Result<StatsF64, DataError> = statistics_f64(span(values));
-    match (result) { Ok(stats) => { assert(false); } Err(NonFiniteResult) => { assert(true); } Err(error) => { assert(false); } }
+
+    match (result) {
+        Ok(stats) => { assert(false); }
+        Err(NonFiniteResult) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn binary_io_supports_f32_i64_and_u64_with_endian_conversion() {
-    let input_f32: [f32; 3] = [1.5, -2.25, 9.0];
-    let mut scratch_f32: [f32; 3] = [0.0, 0.0, 0.0];
-    let mut output_f32: [f32; 3] = [0.0, 0.0, 0.0];
-    let opened_f32: Result<BinaryFile, DataError> = binary_open_write("data_f32_test.bin", LittleEndian);
-    let mut writer_f32: BinaryFile = BinaryFile { handle: nil, byte_order: LittleEndian, writable: true };
-    match (opened_f32) { Ok(file) => { writer_f32 = file; } Err(error) => { assert(false); } }
+    let input_f32: [f32;
+    3] = [1.5, -2.25, 9.0];
+    let mut scratch_f32: [f32;
+    3] = [0.0, 0.0, 0.0];
+    let mut output_f32: [f32;
+    3] = [0.0, 0.0, 0.0];
+    let opened_f32: Result<BinaryFile, DataError> = binary_open_write(
+            "data_f32_test.bin", LittleEndian);
+
+    let mut writer_f32: BinaryFile = BinaryFile {
+        handle: nil, byte_order: LittleEndian, writable: true
+    };
+
+    match (opened_f32) {
+        Ok(file) => { writer_f32 = file; }
+        Err(error) => { assert(false); }
+    }
+
     defer binary_close(&mut writer_f32);
-    let wrote_f32: Result<u64, DataError> = binary_write_f32(&mut writer_f32, span(input_f32), span(scratch_f32));
-    match (wrote_f32) { Ok(n) => { assert(n == 3); } Err(error) => { assert(false); } }
+    let wrote_f32: Result<u64, DataError> = binary_write_f32(
+            &mut writer_f32, span(input_f32), span(scratch_f32));
+
+    match (wrote_f32) {
+        Ok(n) => { assert(n == 3); }
+        Err(error) => { assert(false); }
+    }
+
     let flushed_f32: Result<u64, DataError> = binary_flush(&mut writer_f32);
-    match (flushed_f32) { Ok(n) => { } Err(error) => { assert(false); } }
-    let opened_f32_reader: Result<BinaryFile, DataError> = binary_open_read("data_f32_test.bin", LittleEndian);
-    let mut reader_f32: BinaryFile = BinaryFile { handle: nil, byte_order: LittleEndian, writable: false };
-    match (opened_f32_reader) { Ok(file) => { reader_f32 = file; } Err(error) => { assert(false); } }
+
+    match (flushed_f32) {
+        Ok(n) => { }
+        Err(error) => { assert(false); }
+    }
+
+    let opened_f32_reader: Result<BinaryFile, DataError> = binary_open_read(
+            "data_f32_test.bin", LittleEndian);
+
+    let mut reader_f32: BinaryFile = BinaryFile {
+        handle: nil, byte_order: LittleEndian, writable: false
+    };
+
+    match (opened_f32_reader) {
+        Ok(file) => { reader_f32 = file; }
+        Err(error) => { assert(false); }
+    }
+
     defer binary_close(&mut reader_f32);
-    let read_f32: Result<u64, DataError> = binary_read_f32(&mut reader_f32, span(output_f32));
-    match (read_f32) { Ok(n) => { assert(n == 3); } Err(error) => { assert(false); } }
-    assert(output_f32[0] == input_f32[0] && output_f32[1] == input_f32[1] && output_f32[2] == input_f32[2]);
+    let read_f32: Result<u64, DataError> = binary_read_f32(
+            &mut reader_f32, span(output_f32));
+
+    match (read_f32) {
+        Ok(n) => { assert(n == 3); }
+        Err(error) => { assert(false); }
+    }
+
+    assert(output_f32[0] == input_f32[0] && output_f32[1] == input_f32[1] &&
+        output_f32[2] == input_f32[2]);
     io::remove("data_f32_test.bin");
 
-    let input_i64: [i64; 3] = [1, -2, 9000000000];
-    let mut scratch_i64: [i64; 3] = [0, 0, 0];
-    let mut output_i64: [i64; 3] = [0, 0, 0];
-    let opened_i64: Result<BinaryFile, DataError> = binary_open_write("data_i64_test.bin", BigEndian);
-    let mut writer_i64: BinaryFile = BinaryFile { handle: nil, byte_order: BigEndian, writable: true };
-    match (opened_i64) { Ok(file) => { writer_i64 = file; } Err(error) => { assert(false); } }
+    let input_i64: [i64;
+    3] = [1, -2, 9000000000];
+    let mut scratch_i64: [i64;
+    3] = [0, 0, 0];
+    let mut output_i64: [i64;
+    3] = [0, 0, 0];
+    let opened_i64: Result<BinaryFile, DataError> = binary_open_write(
+            "data_i64_test.bin", BigEndian);
+
+    let mut writer_i64: BinaryFile = BinaryFile {
+        handle: nil, byte_order: BigEndian, writable: true
+    };
+
+    match (opened_i64) {
+        Ok(file) => { writer_i64 = file; }
+        Err(error) => { assert(false); }
+    }
+
     defer binary_close(&mut writer_i64);
-    let wrote_i64: Result<u64, DataError> = binary_write_i64(&mut writer_i64, span(input_i64), span(scratch_i64));
-    match (wrote_i64) { Ok(n) => { assert(n == 3); } Err(error) => { assert(false); } }
+    let wrote_i64: Result<u64, DataError> = binary_write_i64(
+            &mut writer_i64, span(input_i64), span(scratch_i64));
+
+    match (wrote_i64) {
+        Ok(n) => { assert(n == 3); }
+        Err(error) => { assert(false); }
+    }
+
     let flushed_i64: Result<u64, DataError> = binary_flush(&mut writer_i64);
-    match (flushed_i64) { Ok(n) => { } Err(error) => { assert(false); } }
-    let opened_i64_reader: Result<BinaryFile, DataError> = binary_open_read("data_i64_test.bin", BigEndian);
-    let mut reader_i64: BinaryFile = BinaryFile { handle: nil, byte_order: BigEndian, writable: false };
-    match (opened_i64_reader) { Ok(file) => { reader_i64 = file; } Err(error) => { assert(false); } }
+
+    match (flushed_i64) {
+        Ok(n) => { }
+        Err(error) => { assert(false); }
+    }
+
+    let opened_i64_reader: Result<BinaryFile, DataError> = binary_open_read(
+            "data_i64_test.bin", BigEndian);
+
+    let mut reader_i64: BinaryFile = BinaryFile {
+        handle: nil, byte_order: BigEndian, writable: false
+    };
+
+    match (opened_i64_reader) {
+        Ok(file) => { reader_i64 = file; }
+        Err(error) => { assert(false); }
+    }
+
     defer binary_close(&mut reader_i64);
-    let read_i64: Result<u64, DataError> = binary_read_i64(&mut reader_i64, span(output_i64));
-    match (read_i64) { Ok(n) => { assert(n == 3); } Err(error) => { assert(false); } }
-    assert(output_i64[0] == input_i64[0] && output_i64[1] == input_i64[1] && output_i64[2] == input_i64[2]);
+    let read_i64: Result<u64, DataError> = binary_read_i64(
+            &mut reader_i64, span(output_i64));
+
+    match (read_i64) {
+        Ok(n) => { assert(n == 3); }
+        Err(error) => { assert(false); }
+    }
+
+    assert(output_i64[0] == input_i64[0] && output_i64[1] == input_i64[1] &&
+        output_i64[2] == input_i64[2]);
     io::remove("data_i64_test.bin");
 
-    let input_u64: [u64; 3] = [1, 9223372036854775808, 18446744073709551615];
-    let mut scratch_u64: [u64; 3] = [0, 0, 0];
-    let mut output_u64: [u64; 3] = [0, 0, 0];
-    let opened_u64: Result<BinaryFile, DataError> = binary_open_write("data_u64_test.bin", LittleEndian);
-    let mut writer_u64: BinaryFile = BinaryFile { handle: nil, byte_order: LittleEndian, writable: true };
-    match (opened_u64) { Ok(file) => { writer_u64 = file; } Err(error) => { assert(false); } }
+    let input_u64: [u64;
+    3] = [1, 9223372036854775808, 18446744073709551615];
+    let mut scratch_u64: [u64;
+    3] = [0, 0, 0];
+    let mut output_u64: [u64;
+    3] = [0, 0, 0];
+    let opened_u64: Result<BinaryFile, DataError> = binary_open_write(
+            "data_u64_test.bin", LittleEndian);
+
+    let mut writer_u64: BinaryFile = BinaryFile {
+        handle: nil, byte_order: LittleEndian, writable: true
+    };
+
+    match (opened_u64) {
+        Ok(file) => { writer_u64 = file; }
+        Err(error) => { assert(false); }
+    }
+
     defer binary_close(&mut writer_u64);
-    let wrote_u64: Result<u64, DataError> = binary_write_u64(&mut writer_u64, span(input_u64), span(scratch_u64));
-    match (wrote_u64) { Ok(n) => { assert(n == 3); } Err(error) => { assert(false); } }
+    let wrote_u64: Result<u64, DataError> = binary_write_u64(
+            &mut writer_u64, span(input_u64), span(scratch_u64));
+
+    match (wrote_u64) {
+        Ok(n) => { assert(n == 3); }
+        Err(error) => { assert(false); }
+    }
+
     let flushed_u64: Result<u64, DataError> = binary_flush(&mut writer_u64);
-    match (flushed_u64) { Ok(n) => { } Err(error) => { assert(false); } }
-    let opened_u64_reader: Result<BinaryFile, DataError> = binary_open_read("data_u64_test.bin", LittleEndian);
-    let mut reader_u64: BinaryFile = BinaryFile { handle: nil, byte_order: LittleEndian, writable: false };
-    match (opened_u64_reader) { Ok(file) => { reader_u64 = file; } Err(error) => { assert(false); } }
+
+    match (flushed_u64) {
+        Ok(n) => { }
+        Err(error) => { assert(false); }
+    }
+
+    let opened_u64_reader: Result<BinaryFile, DataError> = binary_open_read(
+            "data_u64_test.bin", LittleEndian);
+
+    let mut reader_u64: BinaryFile = BinaryFile {
+        handle: nil, byte_order: LittleEndian, writable: false
+    };
+
+    match (opened_u64_reader) {
+        Ok(file) => { reader_u64 = file; }
+        Err(error) => { assert(false); }
+    }
+
     defer binary_close(&mut reader_u64);
-    let read_u64: Result<u64, DataError> = binary_read_u64(&mut reader_u64, span(output_u64));
-    match (read_u64) { Ok(n) => { assert(n == 3); } Err(error) => { assert(false); } }
-    assert(output_u64[0] == input_u64[0] && output_u64[1] == input_u64[1] && output_u64[2] == input_u64[2]);
+    let read_u64: Result<u64, DataError> = binary_read_u64(
+            &mut reader_u64, span(output_u64));
+
+    match (read_u64) {
+        Ok(n) => { assert(n == 3); }
+        Err(error) => { assert(false); }
+    }
+
+    assert(output_u64[0] == input_u64[0] && output_u64[1] == input_u64[1] &&
+        output_u64[2] == input_u64[2]);
     io::remove("data_u64_test.bin");
 }
 
 @test fn typed_record_batch_columns_are_zero_copy_and_validated() {
     let storage: *f64 = malloc(f64, 4);
     defer free(storage);
-    storage[0] = 1.5; storage[1] = 2.5; storage[2] = 10.0; storage[3] = 20.0;
-    let columns: [ColumnSchema; 2] = [
-        ColumnSchema { name: "time", data_type: F64, byte_offset: 0 },
-        ColumnSchema { name: "pressure", data_type: F64, byte_offset: 16 }
-    ];
-    let bytes: Span<u8> = span(storage as *u8, 32);
-    let batch: RecordBatchView = RecordBatchView { row_count: 2, columns: span(columns), payload: bytes };
+    storage[0] = 1.5;
+    storage[1] = 2.5;
+    storage[2] = 10.0;
+    storage[3] = 20.0;
+    let columns: [ColumnSchema;
+    2] = [
+            ColumnSchema { name: "time", data_type: F64, byte_offset: 0},
+            ColumnSchema { name: "pressure", data_type: F64, byte_offset: 16}];
+    let bytes: Span<u8> = span(storage as * u8, 32);
+
+    let batch: RecordBatchView = RecordBatchView {
+        row_count: 2, columns: span(columns), payload: bytes
+    };
+
     let valid: Result<u64, DataError> = validate_record_batch(batch);
-    match (valid) { Ok(rows) => { assert(rows == 2); } Err(error) => { assert(false); } }
-    let time_column: Result<Span<f64>, DataError> = record_batch_f64_column(batch, 0);
-    let pressure_column: Result<Span<f64>, DataError> = record_batch_f64_column(batch, 1);
-    match (time_column) { Ok(values) => { assert(values[0] == 1.5 && values[1] == 2.5); } Err(error) => { assert(false); } }
-    match (pressure_column) { Ok(values) => { assert(values[0] == 10.0 && values[1] == 20.0); } Err(error) => { assert(false); } }
-    let wrong_type: Result<Span<i64>, DataError> = record_batch_i64_column(batch, 0);
-    match (wrong_type) { Ok(values) => { assert(false); } Err(InvalidSchema) => { assert(true); } Err(error) => { assert(false); } }
+
+    match (valid) {
+        Ok(rows) => { assert(rows == 2); }
+        Err(error) => { assert(false); }
+    }
+
+    let time_column: Result < Span<f64>, DataError > = record_batch_f64_column(
+            batch, 0);
+    let pressure_column: Result < Span<f64>, DataError > =
+        record_batch_f64_column(batch, 1);
+
+    match (time_column) {
+        Ok(values) => { assert(values[0] == 1.5 && values[1] == 2.5); }
+        Err(error) => { assert(false); }
+    }
+
+    match (pressure_column) {
+        Ok(values) => { assert(values[0] == 10.0 && values[1] == 20.0); }
+        Err(error) => { assert(false); }
+    }
+
+    let wrong_type: Result < Span<i64>, DataError > = record_batch_i64_column(
+            batch, 0);
+
+    match (wrong_type) {
+        Ok(values) => { assert(false); }
+        Err(InvalidSchema) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn typed_record_batch_views_cover_all_scalar_column_types() {
@@ -237,106 +551,230 @@ import fdo_format;
     defer free(storage);
     // Cast-derived pointers are not owned; writes through them require
     // mutable bindings (Penstock's pointer-mutability rule).
-    let mut doubles: *f64 = storage as *f64;
-    let mut floats: *f32 = storage as *f32;
-    let mut signed: *i64 = storage as *i64;
-    doubles[0] = 1.5; doubles[1] = 2.5;
-    floats[4] = 3.25; floats[5] = 4.5;
-    signed[3] = 11; signed[4] = 22;
-    storage[5] = 33; storage[6] = 44;
-    let columns: [ColumnSchema; 4] = [
-        ColumnSchema { name: "double", data_type: F64, byte_offset: 0 },
-        ColumnSchema { name: "float", data_type: F32, byte_offset: 16 },
-        ColumnSchema { name: "signed", data_type: I64, byte_offset: 24 },
-        ColumnSchema { name: "unsigned", data_type: U64, byte_offset: 40 }
-    ];
-    let payload: Span<u8> = span(storage as *u8, 56);
-    let batch: RecordBatchView = RecordBatchView { row_count: 2, columns: span(columns), payload: payload };
-    let double_view: Result<Span<f64>, DataError> = record_batch_f64_column(batch, 0);
-    let float_view: Result<Span<f32>, DataError> = record_batch_f32_column(batch, 1);
-    let signed_view: Result<Span<i64>, DataError> = record_batch_i64_column(batch, 2);
-    let unsigned_view: Result<Span<u64>, DataError> = record_batch_u64_column(batch, 3);
-    match (double_view) { Ok(values) => { assert(values[0] == 1.5 && values[1] == 2.5); } Err(error) => { assert(false); } }
-    match (float_view) { Ok(values) => { assert(values[0] == 3.25 && values[1] == 4.5); } Err(error) => { assert(false); } }
-    match (signed_view) { Ok(values) => { assert(values[0] == 11 && values[1] == 22); } Err(error) => { assert(false); } }
-    match (unsigned_view) { Ok(values) => { assert(values[0] == 33 && values[1] == 44); } Err(error) => { assert(false); } }
+    let mut doubles: *f64 = storage as * f64;
+    let mut floats: *f32 = storage as * f32;
+    let mut signed: *i64 = storage as * i64;
+    doubles[0] = 1.5;
+    doubles[1] = 2.5;
+    floats[4] = 3.25;
+    floats[5] = 4.5;
+    signed[3] = 11;
+    signed[4] = 22;
+    storage[5] = 33;
+    storage[6] = 44;
+    let columns: [ColumnSchema;
+    4] = [
+            ColumnSchema { name: "double", data_type: F64, byte_offset: 0},
+            ColumnSchema { name: "float", data_type: F32, byte_offset: 16},
+            ColumnSchema { name: "signed", data_type: I64, byte_offset: 24},
+            ColumnSchema { name: "unsigned", data_type: U64, byte_offset: 40}];
+    let payload: Span<u8> = span(storage as * u8, 56);
+
+    let batch: RecordBatchView = RecordBatchView {
+        row_count: 2, columns: span(columns), payload: payload
+    };
+
+    let double_view: Result < Span<f64>, DataError > = record_batch_f64_column(
+            batch, 0);
+    let float_view: Result < Span<f32>, DataError > = record_batch_f32_column(
+            batch, 1);
+    let signed_view: Result < Span<i64>, DataError > = record_batch_i64_column(
+            batch, 2);
+    let unsigned_view: Result < Span<u64>, DataError > = record_batch_u64_column(
+            batch, 3);
+
+    match (double_view) {
+        Ok(values) => { assert(values[0] == 1.5 && values[1] == 2.5); }
+        Err(error) => { assert(false); }
+    }
+
+    match (float_view) {
+        Ok(values) => { assert(values[0] == 3.25 && values[1] == 4.5); }
+        Err(error) => { assert(false); }
+    }
+
+    match (signed_view) {
+        Ok(values) => { assert(values[0] == 11 && values[1] == 22); }
+        Err(error) => { assert(false); }
+    }
+
+    match (unsigned_view) {
+        Ok(values) => { assert(values[0] == 33 && values[1] == 44); }
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn affine_transform_reports_intermediate_overflow() {
-    let input: [f64; 2] = [1.0e308, 1.0];
-    let mut output: [f64; 2] = [0.0, 0.0];
-    let result: Result<u64, DataError> = affine_transform_f64(span(input), span(output), 2.0, 0.0);
-    match (result) { Ok(n) => { assert(false); } Err(NonFiniteResult) => { assert(true); } Err(error) => { assert(false); } }
-}
+    let input: [f64;
+    2] = [1.0e308, 1.0];
+    let mut output: [f64;
+    2] = [0.0, 0.0];
+    let result: Result<u64, DataError> = affine_transform_f64(
+            span(input), span(output), 2.0, 0.0);
 
+    match (result) {
+        Ok(n) => { assert(false); }
+        Err(NonFiniteResult) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+}
 
 @test fn statistics_rejects_nan_values_explicitly() {
     let infinity: f64 = 1.0e308 * 1.0e308;
     let nan: f64 = infinity - infinity;
-    let values: [f64; 2] = [1.0, nan];
+    let values: [f64;
+    2] = [1.0, nan];
     let result: Result<StatsF64, DataError> = statistics_f64(span(values));
-    match (result) { Ok(stats) => { assert(false); } Err(NonFiniteInput) => { assert(true); } Err(error) => { assert(false); } }
+
+    match (result) {
+        Ok(stats) => { assert(false); }
+        Err(NonFiniteInput) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn binary_transform_reuses_buffers_and_writes_expected_values() {
-    let input: [f64; 4] = [1.0, -2.0, 3.5, 8.0];
-    let mut write_scratch: [f64; 4] = [0.0, 0.0, 0.0, 0.0];
-    let opened: Result<BinaryFile, DataError> = binary_open_write("data_transform_input.bin", BigEndian);
-    let mut writer: BinaryFile = BinaryFile { handle: nil, byte_order: BigEndian, writable: true };
-    match (opened) { Ok(file) => { writer = file; } Err(error) => { assert(false); } }
+    let input: [f64;
+    4] = [1.0, -2.0, 3.5, 8.0];
+    let mut write_scratch: [f64;
+    4] = [0.0, 0.0, 0.0, 0.0];
+    let opened: Result<BinaryFile, DataError> = binary_open_write(
+            "data_transform_input.bin", BigEndian);
+
+    let mut writer: BinaryFile = BinaryFile {
+        handle: nil, byte_order: BigEndian, writable: true
+    };
+
+    match (opened) {
+        Ok(file) => { writer = file; }
+        Err(error) => { assert(false); }
+    }
+
     defer binary_close(&mut writer);
-    let wrote: Result<u64, DataError> = binary_write_f64(&mut writer, span(input), span(write_scratch));
-    match (wrote) { Ok(n) => { assert(n == 4); } Err(error) => { assert(false); } }
+    let wrote: Result<u64, DataError> = binary_write_f64(
+            &mut writer, span(input), span(write_scratch));
+
+    match (wrote) {
+        Ok(n) => { assert(n == 4); }
+        Err(error) => { assert(false); }
+    }
+
     binary_flush(&mut writer);
 
-    let mut input_buffer: [f64; 4] = [0.0, 0.0, 0.0, 0.0];
-    let mut output_buffer: [f64; 4] = [0.0, 0.0, 0.0, 0.0];
-    let mut transform_scratch: [f64; 4] = [0.0, 0.0, 0.0, 0.0];
-    let processor: AffineTransformF64 = AffineTransformF64 { scale: 2.0, offset: 1.0 };
+    let mut input_buffer: [f64;
+    4] = [0.0, 0.0, 0.0, 0.0];
+    let mut output_buffer: [f64;
+    4] = [0.0, 0.0, 0.0, 0.0];
+    let mut transform_scratch: [f64;
+    4] = [0.0, 0.0, 0.0, 0.0];
+
+    let processor: AffineTransformF64 = AffineTransformF64 {
+        scale: 2.0, offset: 1.0
+    };
+
     let transformed: Result<u64, DataError> = process_binary_f64_chunks(
-        processor, "data_transform_input.bin", "data_transform_output.bin", BigEndian,
-        span(input_buffer), span(output_buffer), span(transform_scratch));
-    match (transformed) { Ok(n) => { assert(n == 4); } Err(error) => { assert(false); } }
-    let opened_output: Result<BinaryFile, DataError> = binary_open_read("data_transform_output.bin", BigEndian);
-    let mut reader: BinaryFile = BinaryFile { handle: nil, byte_order: BigEndian, writable: false };
-    match (opened_output) { Ok(file) => { reader = file; } Err(error) => { assert(false); } }
+            processor, "data_transform_input.bin", "data_transform_output.bin",
+            BigEndian, span(input_buffer), span(output_buffer),
+            span(transform_scratch));
+
+    match (transformed) {
+        Ok(n) => { assert(n == 4); }
+        Err(error) => { assert(false); }
+    }
+
+    let opened_output: Result<BinaryFile, DataError> = binary_open_read(
+            "data_transform_output.bin", BigEndian);
+
+    let mut reader: BinaryFile = BinaryFile {
+        handle: nil, byte_order: BigEndian, writable: false
+    };
+
+    match (opened_output) {
+        Ok(file) => { reader = file; }
+        Err(error) => { assert(false); }
+    }
+
     defer binary_close(&mut reader);
-    let mut output: [f64; 4] = [0.0, 0.0, 0.0, 0.0];
-    let read: Result<u64, DataError> = binary_read_f64(&mut reader, span(output));
-    match (read) { Ok(n) => { assert(n == 4); } Err(error) => { assert(false); } }
-    assert(output[0] == 3.0 && output[1] == -3.0 && output[2] == 8.0 && output[3] == 17.0);
+    let mut output: [f64;
+    4] = [0.0, 0.0, 0.0, 0.0];
+    let read: Result<u64, DataError> = binary_read_f64(
+            &mut reader, span(output));
+
+    match (read) {
+        Ok(n) => { assert(n == 4); }
+        Err(error) => { assert(false); }
+    }
+
+    assert(output[0] == 3.0 && output[1] == -3.0 && output[2] == 8.0 &&
+        output[3] == 17.0);
     io::remove("data_transform_input.bin");
     io::remove("data_transform_output.bin");
 }
 
 @test fn text_scan_streams_and_closes_reader() {
-    let opened: Result<Writer, IoError> = io::writer_open("data_lines_test.txt");
+    let opened: Result<Writer, IoError> =
+        io::writer_open("data_lines_test.txt");
     let mut writer: Writer = Writer { handle: -1 };
-    match (opened) { Ok(file) => { writer = file; } Err(error) => { assert(false); } }
+
+    match (opened) {
+        Ok(file) => { writer = file; }
+        Err(error) => { assert(false); }
+    }
+
     let line1: Result<usize, IoError> = io::writer_write(&mut writer, "1.0\n");
     let line2: Result<usize, IoError> = io::writer_write(&mut writer, "2.0\n");
     let line3: Result<usize, IoError> = io::writer_write(&mut writer, "3.0\n");
-    match (line1) { Ok(n) => { assert(n == 4); } Err(error) => { assert(false); } }
-    match (line2) { Ok(n) => { assert(n == 4); } Err(error) => { assert(false); } }
-    match (line3) { Ok(n) => { assert(n == 4); } Err(error) => { assert(false); } }
-    io::writer_flush(&mut writer);
-    io::writer_close(&mut writer);
-    let scanned: Result<StatsF64, DataError> = scan_f64_lines("data_lines_test.txt");
-    match (scanned) {
-        Ok(stats) => { assert(stats.count == 3); assert(fabs(stats.mean - 2.0) < 1.0e-12); }
+
+    match (line1) {
+        Ok(n) => { assert(n == 4); }
         Err(error) => { assert(false); }
     }
+
+    match (line2) {
+        Ok(n) => { assert(n == 4); }
+        Err(error) => { assert(false); }
+    }
+
+    match (line3) {
+        Ok(n) => { assert(n == 4); }
+        Err(error) => { assert(false); }
+    }
+
+    io::writer_flush(&mut writer);
+    io::writer_close(&mut writer);
+    let scanned: Result<StatsF64, DataError> =
+        scan_f64_lines("data_lines_test.txt");
+
+    match (scanned) {
+        Ok(stats) => {
+            assert(stats.count == 3);
+            assert(fabs(stats.mean - 2.0) < 1.0e-12);
+        }
+
+        Err(error) => { assert(false); }
+    }
+
     io::remove("data_lines_test.txt");
 }
 
-
 @test fn fdo_adler32_matches_reference_vectors() {
-    let single: [u8; 1] = [97];
+    let single: [u8;
+    1] = [97];
     let single_checksum: Result<u64, DataError> = fdo_adler32(span(single));
-    match (single_checksum) { Ok(value) => { assert(value == 6422626); } Err(error) => { assert(false); } }
-    let triple: [u8; 3] = [97, 98, 99];
+
+    match (single_checksum) {
+        Ok(value) => { assert(value == 6422626); }
+        Err(error) => { assert(false); }
+    }
+
+    let triple: [u8;
+    3] = [97, 98, 99];
     let triple_checksum: Result<u64, DataError> = fdo_adler32(span(triple));
-    match (triple_checksum) { Ok(value) => { assert(value == 38600999); } Err(error) => { assert(false); } }
+
+    match (triple_checksum) {
+        Ok(value) => { assert(value == 38600999); }
+        Err(error) => { assert(false); }
+    }
 }
 
 fn fdo_round_trip_case(order: ByteOrder) {
@@ -345,38 +783,76 @@ fn fdo_round_trip_case(order: ByteOrder) {
     // run-length encoding would expand (falling back to raw storage)
     let payload: *u8 = malloc(u8, 112);
     let work: *u8 = malloc(u8, 64);
-    defer free(payload); defer free(work);
-    let mut doubles: *f64 = payload as *f64;
-    doubles[0] = 0.0; doubles[1] = 0.5; doubles[2] = 1.0; doubles[3] = 1.5;
-    let mut signed: *i64 = payload as *i64;
-    signed[4] = 7; signed[5] = 7; signed[6] = 7; signed[7] = 8;
-    let mut unsigned: *u64 = payload as *u64;
-    unsigned[8] = 1; unsigned[9] = 1; unsigned[10] = 1; unsigned[11] = 1;
-    let mut floats: *f32 = payload as *f32;
-    floats[24] = 1.5; floats[25] = 2.5; floats[26] = 3.5; floats[27] = 4.5;
-    let specs: [FDOColumnSpec; 4] = [
-        FDOColumnSpec { name: "time", unit: "s", data_type: F64, byte_offset: 0, compression: FdoRaw },
-        FDOColumnSpec { name: "zone", unit: "", data_type: I64, byte_offset: 32, compression: FdoRunLength },
-        FDOColumnSpec { name: "flag", unit: "", data_type: U64, byte_offset: 64, compression: FdoRunLength },
-        FDOColumnSpec { name: "speed", unit: "m/s", data_type: F32, byte_offset: 96, compression: FdoRunLength }
-    ];
-    let mut sizes: [u64; 4] = [0, 0, 0, 0];
-    let mut checksums: [u64; 4] = [0, 0, 0, 0];
-    let mut compress_flags: [u64; 4] = [0, 0, 0, 0];
+    defer free(payload);
+    defer free(work);
+    let mut doubles: *f64 = payload as * f64;
+    doubles[0] = 0.0;
+    doubles[1] = 0.5;
+    doubles[2] = 1.0;
+    doubles[3] = 1.5;
+    let mut signed: *i64 = payload as * i64;
+    signed[4] = 7;
+    signed[5] = 7;
+    signed[6] = 7;
+    signed[7] = 8;
+    let mut unsigned: *u64 = payload as * u64;
+    unsigned[8] = 1;
+    unsigned[9] = 1;
+    unsigned[10] = 1;
+    unsigned[11] = 1;
+    let mut floats: *f32 = payload as * f32;
+    floats[24] = 1.5;
+    floats[25] = 2.5;
+    floats[26] = 3.5;
+    floats[27] = 4.5;
+    let specs: [FDOColumnSpec;
+
+    4] = [
+            FDOColumnSpec { name: "time", unit: "s", data_type: F64, byte_offset: 0, compression: FdoRaw},
+            FDOColumnSpec { name: "zone", unit: "", data_type: I64, byte_offset: 32, compression: FdoRunLength},
+            FDOColumnSpec { name: "flag", unit: "", data_type: U64, byte_offset: 64, compression: FdoRunLength},
+            FDOColumnSpec { name: "speed", unit: "m/s", data_type: F32, byte_offset: 96, compression: FdoRunLength}];
+
+    let mut sizes: [u64;
+    4] = [0, 0, 0, 0];
+    let mut checksums: [u64;
+    4] = [0, 0, 0, 0];
+    let mut compress_flags: [u64;
+    4] = [0, 0, 0, 0];
     let written: Result<u64, DataError> = fdo_write(
-        "fdo_round_trip.bin", order, 4, span(specs), span(payload, 112),
-        span(work, 64), span(sizes), span(checksums), span(compress_flags));
-    match (written) { Ok(bytes) => { assert(bytes == 448); } Err(error) => { assert(false); } }
+            "fdo_round_trip.bin", order, 4, span(specs), span(payload, 112),
+            span(work, 64), span(sizes), span(checksums), span(compress_flags));
+
+    match (written) {
+        Ok(bytes) => { assert(bytes == 448); }
+        Err(error) => { assert(false); }
+    }
+
     // the compressed column stored one run; the expanding one fell back to raw
     assert(sizes[2] == 16 && compress_flags[2] == 1);
     assert(sizes[3] == 16 && compress_flags[3] == 0);
     // verify end-to-end
-    let verified: Result<u64, DataError> = fdo_verify_file("fdo_round_trip.bin", span(work, 64));
-    match (verified) { Ok(columns) => { assert(columns == 4); } Err(error) => { assert(false); } }
+    let verified: Result<u64, DataError> = fdo_verify_file(
+            "fdo_round_trip.bin", span(work, 64));
+
+    match (verified) {
+        Ok(columns) => { assert(columns == 4); }
+        Err(error) => { assert(false); }
+    }
+
     // read the columns back over the same payload buffer
-    let opened: Result<FDOReader, DataError> = fdo_open_read("fdo_round_trip.bin");
-    let mut reader: FDOReader = FDOReader { handle: nil, row_count: 0, column_count: 0, file_is_little_endian: true };
-    match (opened) { Ok(value) => { reader = value; } Err(error) => { assert(false); } }
+    let opened: Result<FDOReader, DataError> =
+        fdo_open_read("fdo_round_trip.bin");
+
+    let mut reader: FDOReader = FDOReader {
+        handle: nil, row_count: 0, column_count: 0, file_is_little_endian: true
+    };
+
+    match (opened) {
+        Ok(value) => { reader = value; }
+        Err(error) => { assert(false); }
+    }
+
     defer fdo_close(&mut reader);
     assert(fdo_row_count(reader) == 4 && fdo_column_count(reader) == 4);
     let payload_span: Span<u8> = span(payload, 112);
@@ -384,30 +860,94 @@ fn fdo_round_trip_case(order: ByteOrder) {
     let zone_out: Span<u8> = payload_span[32..64];
     let flag_out: Span<u8> = payload_span[64..96];
     let speed_out: Span<u8> = payload_span[96..112];
-    let read_time: Result<u64, DataError> = fdo_read_column(reader, 0, F64, "time", "s", time_out, span(work, 64));
-    let read_zone: Result<u64, DataError> = fdo_read_column(reader, 1, I64, "zone", "", zone_out, span(work, 64));
-    let read_flag: Result<u64, DataError> = fdo_read_column(reader, 2, U64, "flag", "", flag_out, span(work, 64));
-    let read_speed: Result<u64, DataError> = fdo_read_column(reader, 3, F32, "speed", "m/s", speed_out, span(work, 64));
-    match (read_time) { Ok(rows) => { assert(rows == 4); } Err(error) => { assert(false); } }
-    match (read_zone) { Ok(rows) => { assert(rows == 4); } Err(error) => { assert(false); } }
-    match (read_flag) { Ok(rows) => { assert(rows == 4); } Err(error) => { assert(false); } }
-    match (read_speed) { Ok(rows) => { assert(rows == 4); } Err(error) => { assert(false); } }
+    let read_time: Result<u64, DataError> = fdo_read_column(
+            reader, 0, F64, "time", "s", time_out, span(work, 64));
+    let read_zone: Result<u64, DataError> = fdo_read_column(
+            reader, 1, I64, "zone", "", zone_out, span(work, 64));
+    let read_flag: Result<u64, DataError> = fdo_read_column(
+            reader, 2, U64, "flag", "", flag_out, span(work, 64));
+    let read_speed: Result<u64, DataError> = fdo_read_column(
+            reader, 3, F32, "speed", "m/s", speed_out, span(work, 64));
+
+    match (read_time) {
+        Ok(rows) => { assert(rows == 4); }
+        Err(error) => { assert(false); }
+    }
+
+    match (read_zone) {
+        Ok(rows) => { assert(rows == 4); }
+        Err(error) => { assert(false); }
+    }
+
+    match (read_flag) {
+        Ok(rows) => { assert(rows == 4); }
+        Err(error) => { assert(false); }
+    }
+
+    match (read_speed) {
+        Ok(rows) => { assert(rows == 4); }
+        Err(error) => { assert(false); }
+    }
+
     // decoded bytes re-viewed through the record-batch accessors
-    let schemas: [ColumnSchema; 4] = [
-        ColumnSchema { name: "time", data_type: F64, byte_offset: 0 },
-        ColumnSchema { name: "zone", data_type: I64, byte_offset: 32 },
-        ColumnSchema { name: "flag", data_type: U64, byte_offset: 64 },
-        ColumnSchema { name: "speed", data_type: F32, byte_offset: 96 }
-    ];
-    let batch: RecordBatchView = RecordBatchView { row_count: 4, columns: span(schemas), payload: payload_span };
-    let times: Result<Span<f64>, DataError> = record_batch_f64_column(batch, 0);
-    match (times) { Ok(values) => { assert(values[0] == 0.0 && values[1] == 0.5 && values[2] == 1.0 && values[3] == 1.5); } Err(error) => { assert(false); } }
-    let zones: Result<Span<i64>, DataError> = record_batch_i64_column(batch, 1);
-    match (zones) { Ok(values) => { assert(values[0] == 7 && values[1] == 7 && values[2] == 7 && values[3] == 8); } Err(error) => { assert(false); } }
-    let flags: Result<Span<u64>, DataError> = record_batch_u64_column(batch, 2);
-    match (flags) { Ok(values) => { assert(values[0] == 1 && values[1] == 1 && values[2] == 1 && values[3] == 1); } Err(error) => { assert(false); } }
-    let speeds: Result<Span<f32>, DataError> = record_batch_f32_column(batch, 3);
-    match (speeds) { Ok(values) => { assert(values[0] == 1.5 && values[1] == 2.5 && values[2] == 3.5 && values[3] == 4.5); } Err(error) => { assert(false); } }
+    let schemas: [ColumnSchema;
+    4] = [
+            ColumnSchema { name: "time", data_type: F64, byte_offset: 0},
+            ColumnSchema { name: "zone", data_type: I64, byte_offset: 32},
+            ColumnSchema { name: "flag", data_type: U64, byte_offset: 64},
+            ColumnSchema { name: "speed", data_type: F32, byte_offset: 96}];
+
+    let batch: RecordBatchView = RecordBatchView {
+        row_count: 4, columns: span(schemas), payload: payload_span
+    };
+
+    let times: Result < Span<f64>, DataError > = record_batch_f64_column(
+            batch, 0);
+
+    match (times) {
+        Ok(values) => {
+            assert(values[0] == 0.0 && values[1] == 0.5 && values[2] == 1.0 &&
+                values[3] == 1.5);
+        }
+
+        Err(error) => { assert(false); }
+    }
+
+    let zones: Result < Span<i64>, DataError > = record_batch_i64_column(
+            batch, 1);
+
+    match (zones) {
+        Ok(values) => {
+            assert(values[0] == 7 && values[1] == 7 && values[2] == 7 &&
+                values[3] == 8);
+        }
+
+        Err(error) => { assert(false); }
+    }
+
+    let flags: Result < Span<u64>, DataError > = record_batch_u64_column(
+            batch, 2);
+
+    match (flags) {
+        Ok(values) => {
+            assert(values[0] == 1 && values[1] == 1 && values[2] == 1 &&
+                values[3] == 1);
+        }
+
+        Err(error) => { assert(false); }
+    }
+
+    let speeds: Result < Span<f32>, DataError > = record_batch_f32_column(
+            batch, 3);
+
+    match (speeds) {
+        Ok(values) => {
+            assert(values[0] == 1.5 && values[1] == 2.5 && values[2] == 3.5 &&
+                values[3] == 4.5);
+        }
+
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn fdo_round_trips_columns_with_both_byte_orders() {
@@ -420,137 +960,327 @@ fn fdo_round_trip_case(order: ByteOrder) {
 @test fn fdo_detects_payload_checksum_corruption() {
     let payload: *u8 = malloc(u8, 112);
     let work: *u8 = malloc(u8, 64);
-    defer free(payload); defer free(work);
-    let mut doubles: *f64 = payload as *f64;
-    doubles[0] = 0.0; doubles[1] = 0.5; doubles[2] = 1.0; doubles[3] = 1.5;
-    let mut signed: *i64 = payload as *i64;
-    signed[4] = 7; signed[5] = 7; signed[6] = 7; signed[7] = 8;
-    let mut unsigned: *u64 = payload as *u64;
-    unsigned[8] = 1; unsigned[9] = 1; unsigned[10] = 1; unsigned[11] = 1;
-    let mut floats: *f32 = payload as *f32;
-    floats[24] = 1.5; floats[25] = 2.5; floats[26] = 3.5; floats[27] = 4.5;
-    let specs: [FDOColumnSpec; 4] = [
-        FDOColumnSpec { name: "time", unit: "s", data_type: F64, byte_offset: 0, compression: FdoRaw },
-        FDOColumnSpec { name: "zone", unit: "", data_type: I64, byte_offset: 32, compression: FdoRunLength },
-        FDOColumnSpec { name: "flag", unit: "", data_type: U64, byte_offset: 64, compression: FdoRunLength },
-        FDOColumnSpec { name: "speed", unit: "m/s", data_type: F32, byte_offset: 96, compression: FdoRunLength }
-    ];
-    let mut sizes: [u64; 4] = [0, 0, 0, 0];
-    let mut checksums: [u64; 4] = [0, 0, 0, 0];
-    let mut compress_flags: [u64; 4] = [0, 0, 0, 0];
+    defer free(payload);
+    defer free(work);
+    let mut doubles: *f64 = payload as * f64;
+    doubles[0] = 0.0;
+    doubles[1] = 0.5;
+    doubles[2] = 1.0;
+    doubles[3] = 1.5;
+    let mut signed: *i64 = payload as * i64;
+    signed[4] = 7;
+    signed[5] = 7;
+    signed[6] = 7;
+    signed[7] = 8;
+    let mut unsigned: *u64 = payload as * u64;
+    unsigned[8] = 1;
+    unsigned[9] = 1;
+    unsigned[10] = 1;
+    unsigned[11] = 1;
+    let mut floats: *f32 = payload as * f32;
+    floats[24] = 1.5;
+    floats[25] = 2.5;
+    floats[26] = 3.5;
+    floats[27] = 4.5;
+    let specs: [FDOColumnSpec;
+
+    4] = [
+            FDOColumnSpec { name: "time", unit: "s", data_type: F64, byte_offset: 0, compression: FdoRaw},
+            FDOColumnSpec { name: "zone", unit: "", data_type: I64, byte_offset: 32, compression: FdoRunLength},
+            FDOColumnSpec { name: "flag", unit: "", data_type: U64, byte_offset: 64, compression: FdoRunLength},
+            FDOColumnSpec { name: "speed", unit: "m/s", data_type: F32, byte_offset: 96, compression: FdoRunLength}];
+
+    let mut sizes: [u64;
+    4] = [0, 0, 0, 0];
+    let mut checksums: [u64;
+    4] = [0, 0, 0, 0];
+    let mut compress_flags: [u64;
+    4] = [0, 0, 0, 0];
     let written: Result<u64, DataError> = fdo_write(
-        "fdo_corrupt.bin", LittleEndian, 4, span(specs), span(payload, 112),
-        span(work, 64), span(sizes), span(checksums), span(compress_flags));
-    match (written) { Ok(bytes) => { assert(bytes == 448); } Err(error) => { assert(false); } }
+            "fdo_corrupt.bin", LittleEndian, 4, span(specs), span(payload, 112),
+            span(work, 64), span(sizes), span(checksums), span(compress_flags));
+
+    match (written) {
+        Ok(bytes) => { assert(bytes == 448); }
+        Err(error) => { assert(false); }
+    }
+
     // flip one payload byte by rewriting the 448-byte file as 56 native u64s
     let words: *u64 = malloc(u64, 56);
     let scratch: *u64 = malloc(u64, 56);
-    defer free(words); defer free(scratch);
-    let opened_reader: Result<BinaryFile, DataError> = binary_open_read("fdo_corrupt.bin", Native);
-    let mut reader: BinaryFile = BinaryFile { handle: nil, byte_order: Native, writable: false };
-    match (opened_reader) { Ok(file) => { reader = file; } Err(error) => { assert(false); } }
+    defer free(words);
+    defer free(scratch);
+    let opened_reader: Result<BinaryFile, DataError> = binary_open_read(
+            "fdo_corrupt.bin", Native);
+
+    let mut reader: BinaryFile = BinaryFile {
+        handle: nil, byte_order: Native, writable: false
+    };
+
+    match (opened_reader) {
+        Ok(file) => { reader = file; }
+        Err(error) => { assert(false); }
+    }
+
     defer binary_close(&mut reader);
-    let read_words: Result<u64, DataError> = binary_read_u64(&mut reader, span(words, 56));
-    match (read_words) { Ok(count) => { assert(count == 56); } Err(error) => { assert(false); } }
+    let read_words: Result<u64, DataError> = binary_read_u64(
+            &mut reader, span(words, 56));
+
+    match (read_words) {
+        Ok(count) => { assert(count == 56); }
+        Err(error) => { assert(false); }
+    }
+
     words[45] = words[45] + 1;
-    let opened_writer: Result<BinaryFile, DataError> = binary_open_write("fdo_corrupt.bin", Native);
-    let mut writer: BinaryFile = BinaryFile { handle: nil, byte_order: Native, writable: true };
-    match (opened_writer) { Ok(file) => { writer = file; } Err(error) => { assert(false); } }
+    let opened_writer: Result<BinaryFile, DataError> = binary_open_write(
+            "fdo_corrupt.bin", Native);
+
+    let mut writer: BinaryFile = BinaryFile {
+        handle: nil, byte_order: Native, writable: true
+    };
+
+    match (opened_writer) {
+        Ok(file) => { writer = file; }
+        Err(error) => { assert(false); }
+    }
+
     defer binary_close(&mut writer);
-    let written_words: Result<u64, DataError> = binary_write_u64(&mut writer, span(words, 56), span(scratch, 56));
-    match (written_words) { Ok(count) => { assert(count == 56); } Err(error) => { assert(false); } }
+    let written_words: Result<u64, DataError> = binary_write_u64(
+            &mut writer, span(words, 56), span(scratch, 56));
+
+    match (written_words) {
+        Ok(count) => { assert(count == 56); }
+        Err(error) => { assert(false); }
+    }
+
     binary_flush(&mut writer);
-    let verified: Result<u64, DataError> = fdo_verify_file("fdo_corrupt.bin", span(work, 64));
-    match (verified) { Ok(columns) => { assert(false); } Err(ChecksumMismatch) => { assert(true); } Err(error) => { assert(false); } }
+    let verified: Result<u64, DataError> = fdo_verify_file(
+            "fdo_corrupt.bin", span(work, 64));
+
+    match (verified) {
+        Ok(columns) => { assert(false); }
+        Err(ChecksumMismatch) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+
     // the corrupted column read must fail as well
-    let opened_corrupt: Result<FDOReader, DataError> = fdo_open_read("fdo_corrupt.bin");
-    let mut corrupt_reader: FDOReader = FDOReader { handle: nil, row_count: 0, column_count: 0, file_is_little_endian: true };
-    match (opened_corrupt) { Ok(value) => { corrupt_reader = value; } Err(error) => { assert(false); } }
+    let opened_corrupt: Result<FDOReader, DataError> =
+        fdo_open_read("fdo_corrupt.bin");
+
+    let mut corrupt_reader: FDOReader = FDOReader {
+        handle: nil, row_count: 0, column_count: 0, file_is_little_endian: true
+    };
+
+    match (opened_corrupt) {
+        Ok(value) => { corrupt_reader = value; }
+        Err(error) => { assert(false); }
+    }
+
     defer fdo_close(&mut corrupt_reader);
-    let mut corrupted_output: [u8; 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    let corrupted_read: Result<u64, DataError> = fdo_read_column(corrupt_reader, 0, F64, "time", "s", span(corrupted_output), span(work, 64));
-    match (corrupted_read) { Ok(rows) => { assert(false); } Err(ChecksumMismatch) => { assert(true); } Err(error) => { assert(false); } }
+    let mut corrupted_output: [u8;
+    32] = [
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let corrupted_read: Result<u64, DataError> = fdo_read_column(
+            corrupt_reader, 0, F64, "time", "s", span(corrupted_output),
+            span(work, 64));
+
+    match (corrupted_read) {
+        Ok(rows) => { assert(false); }
+        Err(ChecksumMismatch) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+
     io::remove("fdo_corrupt.bin");
 }
 
 @test fn fdo_rejects_foreign_files_and_schema_mismatches() {
     // a plain f64 block is not an FDO file
-    let input: [f64; 4] = [1.0, 2.0, 3.0, 4.0];
-    let mut scratch: [f64; 4] = [0.0, 0.0, 0.0, 0.0];
-    let opened_writer: Result<BinaryFile, DataError> = binary_open_write("fdo_foreign.bin", Native);
-    let mut writer: BinaryFile = BinaryFile { handle: nil, byte_order: Native, writable: true };
-    match (opened_writer) { Ok(file) => { writer = file; } Err(error) => { assert(false); } }
+    let input: [f64;
+    4] = [1.0, 2.0, 3.0, 4.0];
+    let mut scratch: [f64;
+    4] = [0.0, 0.0, 0.0, 0.0];
+    let opened_writer: Result<BinaryFile, DataError> = binary_open_write(
+            "fdo_foreign.bin", Native);
+
+    let mut writer: BinaryFile = BinaryFile {
+        handle: nil, byte_order: Native, writable: true
+    };
+
+    match (opened_writer) {
+        Ok(file) => { writer = file; }
+        Err(error) => { assert(false); }
+    }
+
     defer binary_close(&mut writer);
-    let wrote: Result<u64, DataError> = binary_write_f64(&mut writer, span(input), span(scratch));
-    match (wrote) { Ok(count) => { assert(count == 4); } Err(error) => { assert(false); } }
+    let wrote: Result<u64, DataError> = binary_write_f64(
+            &mut writer, span(input), span(scratch));
+
+    match (wrote) {
+        Ok(count) => { assert(count == 4); }
+        Err(error) => { assert(false); }
+    }
+
     binary_flush(&mut writer);
-    let foreign: Result<FDOReader, DataError> = fdo_open_read("fdo_foreign.bin");
-    match (foreign) { Ok(value) => { assert(false); } Err(InvalidFormat) => { assert(true); } Err(error) => { assert(false); } }
+    let foreign: Result<FDOReader, DataError> =
+        fdo_open_read("fdo_foreign.bin");
+
+    match (foreign) {
+        Ok(value) => { assert(false); }
+        Err(InvalidFormat) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+
     io::remove("fdo_foreign.bin");
     // schema mismatches on a valid file
     let payload: *u8 = malloc(u8, 32);
     let work: *u8 = malloc(u8, 64);
-    defer free(payload); defer free(work);
-    let mut doubles: *f64 = payload as *f64;
-    doubles[0] = 1.0; doubles[1] = 2.0; doubles[2] = 3.0; doubles[3] = 4.0;
-    let specs: [FDOColumnSpec; 1] = [
-        FDOColumnSpec { name: "level", unit: "m", data_type: F64, byte_offset: 0, compression: FdoRaw }
-    ];
-    let mut sizes: [u64; 1] = [0];
-    let mut checksums: [u64; 1] = [0];
-    let mut compress_flags: [u64; 1] = [0];
+    defer free(payload);
+    defer free(work);
+    let mut doubles: *f64 = payload as * f64;
+    doubles[0] = 1.0;
+    doubles[1] = 2.0;
+    doubles[2] = 3.0;
+    doubles[3] = 4.0;
+    let specs: [FDOColumnSpec;
+
+    1] =
+        [FDOColumnSpec {
+        name: "level", unit: "m", data_type: F64, byte_offset: 0,
+        compression: FdoRaw
+    }];
+
+    let mut sizes: [u64;
+    1] = [0];
+    let mut checksums: [u64;
+    1] = [0];
+    let mut compress_flags: [u64;
+    1] = [0];
     let written: Result<u64, DataError> = fdo_write(
-        "fdo_schema.bin", BigEndian, 4, span(specs), span(payload, 32),
-        span(work, 64), span(sizes), span(checksums), span(compress_flags));
-    match (written) { Ok(bytes) => { assert(bytes == 144); } Err(error) => { assert(false); } }
+            "fdo_schema.bin", BigEndian, 4, span(specs), span(payload, 32),
+            span(work, 64), span(sizes), span(checksums), span(compress_flags));
+
+    match (written) {
+        Ok(bytes) => { assert(bytes == 144); }
+        Err(error) => { assert(false); }
+    }
+
     let opened: Result<FDOReader, DataError> = fdo_open_read("fdo_schema.bin");
-    let mut reader: FDOReader = FDOReader { handle: nil, row_count: 0, column_count: 0, file_is_little_endian: true };
-    match (opened) { Ok(value) => { reader = value; } Err(error) => { assert(false); } }
+
+    let mut reader: FDOReader = FDOReader {
+        handle: nil, row_count: 0, column_count: 0, file_is_little_endian: true
+    };
+
+    match (opened) {
+        Ok(value) => { reader = value; }
+        Err(error) => { assert(false); }
+    }
+
     defer fdo_close(&mut reader);
-    let mut output: [u8; 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    let wrong_name: Result<u64, DataError> = fdo_read_column(reader, 0, F64, "height", "m", span(output), span(work, 64));
-    match (wrong_name) { Ok(rows) => { assert(false); } Err(InvalidSchema) => { assert(true); } Err(error) => { assert(false); } }
-    let wrong_unit: Result<u64, DataError> = fdo_read_column(reader, 0, F64, "level", "", span(output), span(work, 64));
-    match (wrong_unit) { Ok(rows) => { assert(false); } Err(InvalidSchema) => { assert(true); } Err(error) => { assert(false); } }
-    let wrong_type: Result<u64, DataError> = fdo_read_column(reader, 0, I64, "level", "m", span(output), span(work, 64));
-    match (wrong_type) { Ok(rows) => { assert(false); } Err(InvalidSchema) => { assert(true); } Err(error) => { assert(false); } }
+    let mut output: [u8;
+    32] = [
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let wrong_name: Result<u64, DataError> = fdo_read_column(
+            reader, 0, F64, "height", "m", span(output), span(work, 64));
+
+    match (wrong_name) {
+        Ok(rows) => { assert(false); }
+        Err(InvalidSchema) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+
+    let wrong_unit: Result<u64, DataError> = fdo_read_column(
+            reader, 0, F64, "level", "", span(output), span(work, 64));
+
+    match (wrong_unit) {
+        Ok(rows) => { assert(false); }
+        Err(InvalidSchema) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+
+    let wrong_type: Result<u64, DataError> = fdo_read_column(
+            reader, 0, I64, "level", "m", span(output), span(work, 64));
+
+    match (wrong_type) {
+        Ok(rows) => { assert(false); }
+        Err(InvalidSchema) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+
     io::remove("fdo_schema.bin");
 }
 
 @test fn fdo_writer_validates_schema_and_workspace_sizes() {
     let payload: *u8 = malloc(u8, 32);
     let work: *u8 = malloc(u8, 64);
-    defer free(payload); defer free(work);
-    let mut doubles: *f64 = payload as *f64;
-    doubles[0] = 1.0; doubles[1] = 2.0; doubles[2] = 3.0; doubles[3] = 4.0;
+    defer free(payload);
+    defer free(work);
+    let mut doubles: *f64 = payload as * f64;
+    doubles[0] = 1.0;
+    doubles[1] = 2.0;
+    doubles[2] = 3.0;
+    doubles[3] = 4.0;
     // overlapping columns are rejected
-    let overlapping: [FDOColumnSpec; 2] = [
-        FDOColumnSpec { name: "first", unit: "", data_type: F64, byte_offset: 0, compression: FdoRaw },
-        FDOColumnSpec { name: "second", unit: "", data_type: F64, byte_offset: 16, compression: FdoRaw }
-    ];
-    let mut sizes: [u64; 2] = [0, 0];
-    let mut checksums: [u64; 2] = [0, 0];
-    let mut compress_flags: [u64; 2] = [0, 0];
+    let overlapping: [FDOColumnSpec;
+
+    2] = [
+            FDOColumnSpec { name: "first", unit: "", data_type: F64, byte_offset: 0, compression: FdoRaw},
+            FDOColumnSpec { name: "second", unit: "", data_type: F64, byte_offset: 16, compression: FdoRaw}];
+
+    let mut sizes: [u64;
+    2] = [0, 0];
+    let mut checksums: [u64;
+    2] = [0, 0];
+    let mut compress_flags: [u64;
+    2] = [0, 0];
     let invalid_schema: Result<u64, DataError> = fdo_write(
-        "fdo_invalid.bin", LittleEndian, 4, span(overlapping), span(payload, 32),
-        span(work, 64), span(sizes), span(checksums), span(compress_flags));
-    match (invalid_schema) { Ok(bytes) => { assert(false); } Err(InvalidSchema) => { assert(true); } Err(error) => { assert(false); } }
+            "fdo_invalid.bin", LittleEndian, 4, span(overlapping),
+            span(payload, 32), span(work, 64), span(sizes), span(checksums),
+            span(compress_flags));
+
+    match (invalid_schema) {
+        Ok(bytes) => { assert(false); }
+        Err(InvalidSchema) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+
     // names longer than 15 characters are rejected
-    let long_names: [FDOColumnSpec; 1] = [
-        FDOColumnSpec { name: "a_very_long_column_name", unit: "", data_type: F64, byte_offset: 0, compression: FdoRaw }
-    ];
+    let long_names: [FDOColumnSpec;
+
+    1] =
+        [FDOColumnSpec {
+        name: "a_very_long_column_name", unit: "", data_type: F64,
+        byte_offset: 0, compression: FdoRaw
+    }];
+
     let invalid_name: Result<u64, DataError> = fdo_write(
-        "fdo_invalid.bin", LittleEndian, 4, span(long_names), span(payload, 32),
-        span(work, 64), span(sizes), span(checksums), span(compress_flags));
-    match (invalid_name) { Ok(bytes) => { assert(false); } Err(InvalidSchema) => { assert(true); } Err(error) => { assert(false); } }
+            "fdo_invalid.bin", LittleEndian, 4, span(long_names),
+            span(payload, 32), span(work, 64), span(sizes), span(checksums),
+            span(compress_flags));
+
+    match (invalid_name) {
+        Ok(bytes) => { assert(false); }
+        Err(InvalidSchema) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+
     // an undersized work buffer is rejected
-    let single: [FDOColumnSpec; 1] = [
-        FDOColumnSpec { name: "level", unit: "m", data_type: F64, byte_offset: 0, compression: FdoRaw }
-    ];
+    let single: [FDOColumnSpec;
+
+    1] =
+        [FDOColumnSpec {
+        name: "level", unit: "m", data_type: F64, byte_offset: 0,
+        compression: FdoRaw
+    }];
+
     let undersized: Result<u64, DataError> = fdo_write(
-        "fdo_invalid.bin", LittleEndian, 4, span(single), span(payload, 32),
-        span(work, 16), span(sizes), span(checksums), span(compress_flags));
-    match (undersized) { Ok(bytes) => { assert(false); } Err(DimensionMismatch) => { assert(true); } Err(error) => { assert(false); } }
+            "fdo_invalid.bin", LittleEndian, 4, span(single), span(payload, 32),
+            span(work, 16), span(sizes), span(checksums), span(compress_flags));
+
+    match (undersized) {
+        Ok(bytes) => { assert(false); }
+        Err(DimensionMismatch) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
 }

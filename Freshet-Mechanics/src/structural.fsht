@@ -11,10 +11,7 @@ import freshet_numerics;
 // Axial element results for post-processing. Tension is positive; strain is
 // the engineering extension over the original length.
 pub struct TrussElementResults {
-    axial_force_n: f64,
-    axial_stress_pa: f64,
-    axial_strain: f64,
-    length_m: f64
+    axial_force_n: f64, axial_stress_pa: f64, axial_strain: f64, length_m: f64
 }
 
 // Global equilibrium summary over the constrained/free split of the solved
@@ -24,12 +21,8 @@ pub struct TrussElementResults {
 // correctly solved equilibrated statics problem each sum is zero up to
 // round-off. The 2D variant reports zero for the z sum.
 pub struct EquilibriumReport {
-    residual_norm: f64,
-    residual_max: f64,
-    load_reaction_sum_x: f64,
-    load_reaction_sum_y: f64,
-    load_reaction_sum_z: f64,
-    equilibrium_ok: bool
+    residual_norm: f64, residual_max: f64, load_reaction_sum_x: f64,
+    load_reaction_sum_y: f64, load_reaction_sum_z: f64, equilibrium_ok: bool
 }
 
 pub fn global_dof_count_2d(node_count: u64) -> Result<u64, MechanicsError> {
@@ -46,14 +39,18 @@ pub fn global_dof_count_3d(node_count: u64) -> Result<u64, MechanicsError> {
     }
 }
 
-pub fn truss_coo_entry_count_2d(element_count: u64) -> Result<u64, MechanicsError> {
+pub fn truss_coo_entry_count_2d(
+    element_count: u64
+) -> Result<u64, MechanicsError> {
     match (checked_mul(element_count, 16)) {
         Some(value) => { return Ok(value); }
         None => { return Err(MechanicsSizeOverflow); }
     }
 }
 
-pub fn truss_coo_entry_count_3d(element_count: u64) -> Result<u64, MechanicsError> {
+pub fn truss_coo_entry_count_3d(
+    element_count: u64
+) -> Result<u64, MechanicsError> {
     match (checked_mul(element_count, 36)) {
         Some(value) => { return Ok(value); }
         None => { return Err(MechanicsSizeOverflow); }
@@ -68,45 +65,81 @@ pub fn truss_coo_entry_count_3d(element_count: u64) -> Result<u64, MechanicsErro
 // element's original length for post-processing. Assembly is serial: elements
 // intentionally scatter into shared columns.
 pub fn assemble_global_truss_2d(
-    node_count: u64, element_count: u64,
-    coordinates_m: Span<f64>, connectivity: Span<u64>,
-    young_modulus_pa: Span<f64>, cross_section_area_m2: Span<f64>,
-    dof_rows: Span<u64>, dof_cols: Span<u64>, values: Span<f64>,
-    element_lengths_m: Span<f64>
+    node_count: u64, element_count: u64, coordinates_m: Span<f64>,
+    connectivity: Span<u64>, young_modulus_pa: Span<f64>,
+    cross_section_area_m2: Span<f64>, dof_rows: Span<u64>, dof_cols: Span<u64>,
+    values: Span<f64>, element_lengths_m: Span<f64>
 ) -> Result<u64, MechanicsError> {
-    if (node_count < 2 || element_count == 0) { return Err(MechanicsInvalidDimension); }
+    if (node_count < 2 || element_count == 0) {
+        return Err(MechanicsInvalidDimension);
+    }
+
     let coordinate_entries: u64 = global_dof_count_2d(node_count)?;
     let entries: u64 = truss_coo_entry_count_2d(element_count)?;
-    if (coordinates_m.len != coordinate_entries || connectivity.len != 2 * element_count ||
-        young_modulus_pa.len != element_count || cross_section_area_m2.len != element_count ||
-        dof_rows.len != entries || dof_cols.len != entries || values.len != entries ||
-        element_lengths_m.len != element_count) { return Err(MechanicsDimensionMismatch); }
-    for (i in 0..coordinates_m.len) { if (!mechanics_finite_f64(coordinates_m.ptr[i])) { return Err(MechanicsNonFiniteInput); } }
-    for (i in 0..young_modulus_pa.len) {
-        if (!mechanics_finite_f64(young_modulus_pa.ptr[i]) || !mechanics_finite_f64(cross_section_area_m2.ptr[i]) ||
-            young_modulus_pa.ptr[i] <= 0.0 || cross_section_area_m2.ptr[i] <= 0.0) { return Err(InvalidMaterial); }
+
+    if (coordinates_m.len != coordinate_entries || connectivity.len != 2 *
+        element_count || young_modulus_pa.len != element_count ||
+        cross_section_area_m2.len != element_count || dof_rows.len != entries ||
+        dof_cols.len != entries || values.len != entries ||
+        element_lengths_m.len != element_count) {
+        return Err(MechanicsDimensionMismatch);
     }
+
+    for (i in 0..coordinates_m.len) {
+        if (!mechanics_finite_f64(coordinates_m.ptr[i])) {
+            return Err(MechanicsNonFiniteInput);
+        }
+    }
+
+    for (i in 0..young_modulus_pa.len) {
+        if (!mechanics_finite_f64(young_modulus_pa.ptr[i]) ||
+            !mechanics_finite_f64(cross_section_area_m2.ptr[i]) ||
+            young_modulus_pa.ptr[i] <= 0.0 || cross_section_area_m2.ptr[i] <=
+            0.0) { return Err(InvalidMaterial); }
+    }
+
     let mut rows_ptr: *u64 = dof_rows.ptr;
     let mut cols_ptr: *u64 = dof_cols.ptr;
     let mut values_ptr: *f64 = values.ptr;
     let mut lengths_ptr: *f64 = element_lengths_m.ptr;
-    let mut stiffness: [f64; 16] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut stiffness: [f64;
+    16] = [
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0];
     let mut written: u64 = 0;
+
     for (element in 0..element_count) {
         let a: u64 = connectivity.ptr[2 * element];
         let b: u64 = connectivity.ptr[2 * element + 1];
-        if (a >= node_count || b >= node_count || a == b) { return Err(InvalidGeometry); }
-        let x1: f64 = coordinates_m.ptr[2 * a]; let y1: f64 = coordinates_m.ptr[2 * a + 1];
-        let x2: f64 = coordinates_m.ptr[2 * b]; let y2: f64 = coordinates_m.ptr[2 * b + 1];
+
+        if (a >= node_count || b >= node_count || a == b) {
+            return Err(InvalidGeometry);
+        }
+
+        let x1: f64 = coordinates_m.ptr[2 * a];
+        let y1: f64 = coordinates_m.ptr[2 * a + 1];
+        let x2: f64 = coordinates_m.ptr[2 * b];
+        let y2: f64 = coordinates_m.ptr[2 * b + 1];
         let assembled: Result<u64, MechanicsError> = truss_element_stiffness_2d(
-            x1, y1, x2, y2, young_modulus_pa.ptr[element], cross_section_area_m2.ptr[element], span(stiffness));
+                x1, y1, x2, y2, young_modulus_pa.ptr[element],
+                cross_section_area_m2.ptr[element], span(stiffness));
+
         match (assembled) {
-            Ok(count) => { if (count != 16) { return Err(MechanicsDimensionMismatch); } }
+            Ok(count) => {
+                if (count != 16) { return Err(MechanicsDimensionMismatch); }
+            }
+
             Err(error) => { return Err(error); }
         }
+
         let length: f64 = norm2(Vector2 { x: x2 - x1, y: y2 - y1 })?;
-        if (!mechanics_finite_f64(length) || length <= 0.0) { return Err(InvalidGeometry); }
+
+        if (!mechanics_finite_f64(length) || length <= 0.0) {
+            return Err(InvalidGeometry);
+        }
+
         lengths_ptr[element] = length;
+
         for (row in 0..4) {
             for (col in 0..4) {
                 // local dofs are [2a, 2a+1, 2b, 2b+1]
@@ -120,59 +153,100 @@ pub fn assemble_global_truss_2d(
                 written = written + 1;
             }
         }
+
         if (written > entries) { return Err(MechanicsSizeOverflow); }
     }
-    for (i in 0..values.len) { if (!mechanics_finite_f64(values_ptr[i])) { return Err(MechanicsNonFiniteResult); } }
+
+    for (i in 0..values.len) {
+        if (!mechanics_finite_f64(values_ptr[i])) {
+            return Err(MechanicsNonFiniteResult);
+        }
+    }
+
     return Ok(written);
 }
 
 // Assemble the global stiffness of a 3D truss in COO form (36 entries per
 // element over the global dofs 3n, 3n+1, 3n+2), mirroring the 2D routine.
 pub fn assemble_global_truss_3d(
-    node_count: u64, element_count: u64,
-    coordinates_m: Span<f64>, connectivity: Span<u64>,
-    young_modulus_pa: Span<f64>, cross_section_area_m2: Span<f64>,
-    dof_rows: Span<u64>, dof_cols: Span<u64>, values: Span<f64>,
-    element_lengths_m: Span<f64>
+    node_count: u64, element_count: u64, coordinates_m: Span<f64>,
+    connectivity: Span<u64>, young_modulus_pa: Span<f64>,
+    cross_section_area_m2: Span<f64>, dof_rows: Span<u64>, dof_cols: Span<u64>,
+    values: Span<f64>, element_lengths_m: Span<f64>
 ) -> Result<u64, MechanicsError> {
-    if (node_count < 2 || element_count == 0) { return Err(MechanicsInvalidDimension); }
+    if (node_count < 2 || element_count == 0) {
+        return Err(MechanicsInvalidDimension);
+    }
+
     let coordinate_entries: u64 = global_dof_count_3d(node_count)?;
     let entries: u64 = truss_coo_entry_count_3d(element_count)?;
-    if (coordinates_m.len != coordinate_entries || connectivity.len != 2 * element_count ||
-        young_modulus_pa.len != element_count || cross_section_area_m2.len != element_count ||
-        dof_rows.len != entries || dof_cols.len != entries || values.len != entries ||
-        element_lengths_m.len != element_count) { return Err(MechanicsDimensionMismatch); }
-    for (i in 0..coordinates_m.len) { if (!mechanics_finite_f64(coordinates_m.ptr[i])) { return Err(MechanicsNonFiniteInput); } }
-    for (i in 0..young_modulus_pa.len) {
-        if (!mechanics_finite_f64(young_modulus_pa.ptr[i]) || !mechanics_finite_f64(cross_section_area_m2.ptr[i]) ||
-            young_modulus_pa.ptr[i] <= 0.0 || cross_section_area_m2.ptr[i] <= 0.0) { return Err(InvalidMaterial); }
+
+    if (coordinates_m.len != coordinate_entries || connectivity.len != 2 *
+        element_count || young_modulus_pa.len != element_count ||
+        cross_section_area_m2.len != element_count || dof_rows.len != entries ||
+        dof_cols.len != entries || values.len != entries ||
+        element_lengths_m.len != element_count) {
+        return Err(MechanicsDimensionMismatch);
     }
+
+    for (i in 0..coordinates_m.len) {
+        if (!mechanics_finite_f64(coordinates_m.ptr[i])) {
+            return Err(MechanicsNonFiniteInput);
+        }
+    }
+
+    for (i in 0..young_modulus_pa.len) {
+        if (!mechanics_finite_f64(young_modulus_pa.ptr[i]) ||
+            !mechanics_finite_f64(cross_section_area_m2.ptr[i]) ||
+            young_modulus_pa.ptr[i] <= 0.0 || cross_section_area_m2.ptr[i] <=
+            0.0) { return Err(InvalidMaterial); }
+    }
+
     let mut rows_ptr: *u64 = dof_rows.ptr;
     let mut cols_ptr: *u64 = dof_cols.ptr;
     let mut values_ptr: *f64 = values.ptr;
     let mut lengths_ptr: *f64 = element_lengths_m.ptr;
-    let mut stiffness: [f64; 36] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut stiffness: [f64;
+    36] = [
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
     let mut written: u64 = 0;
+
     for (element in 0..element_count) {
         let a: u64 = connectivity.ptr[2 * element];
         let b: u64 = connectivity.ptr[2 * element + 1];
-        if (a >= node_count || b >= node_count || a == b) { return Err(InvalidGeometry); }
-        let x1: f64 = coordinates_m.ptr[3 * a]; let y1: f64 = coordinates_m.ptr[3 * a + 1]; let z1: f64 = coordinates_m.ptr[3 * a + 2];
-        let x2: f64 = coordinates_m.ptr[3 * b]; let y2: f64 = coordinates_m.ptr[3 * b + 1]; let z2: f64 = coordinates_m.ptr[3 * b + 2];
+
+        if (a >= node_count || b >= node_count || a == b) {
+            return Err(InvalidGeometry);
+        }
+
+        let x1: f64 = coordinates_m.ptr[3 * a];
+        let y1: f64 = coordinates_m.ptr[3 * a + 1];
+        let z1: f64 = coordinates_m.ptr[3 * a + 2];
+        let x2: f64 = coordinates_m.ptr[3 * b];
+        let y2: f64 = coordinates_m.ptr[3 * b + 1];
+        let z2: f64 = coordinates_m.ptr[3 * b + 2];
         let assembled: Result<u64, MechanicsError> = truss_element_stiffness_3d(
-            x1, y1, z1, x2, y2, z2, young_modulus_pa.ptr[element], cross_section_area_m2.ptr[element], span(stiffness));
+                x1, y1, z1, x2, y2, z2, young_modulus_pa.ptr[element],
+                cross_section_area_m2.ptr[element], span(stiffness));
+
         match (assembled) {
-            Ok(count) => { if (count != 36) { return Err(MechanicsDimensionMismatch); } }
+            Ok(count) => {
+                if (count != 36) { return Err(MechanicsDimensionMismatch); }
+            }
+
             Err(error) => { return Err(error); }
         }
+
         let length: f64 = norm3(Vector3 { x: x2 - x1, y: y2 - y1, z: z2 - z1 })?;
-        if (!mechanics_finite_f64(length) || length <= 0.0) { return Err(InvalidGeometry); }
+
+        if (!mechanics_finite_f64(length) || length <= 0.0) {
+            return Err(InvalidGeometry);
+        }
+
         lengths_ptr[element] = length;
+
         for (row in 0..6) {
             for (col in 0..6) {
                 // local dofs are [3a, 3a+1, 3a+2, 3b, 3b+1, 3b+2]
@@ -186,9 +260,16 @@ pub fn assemble_global_truss_3d(
                 written = written + 1;
             }
         }
+
         if (written > entries) { return Err(MechanicsSizeOverflow); }
     }
-    for (i in 0..values.len) { if (!mechanics_finite_f64(values_ptr[i])) { return Err(MechanicsNonFiniteResult); } }
+
+    for (i in 0..values.len) {
+        if (!mechanics_finite_f64(values_ptr[i])) {
+            return Err(MechanicsNonFiniteResult);
+        }
+    }
+
     return Ok(written);
 }
 
@@ -205,44 +286,75 @@ pub fn apply_sparse_dirichlet_constraints_f64(
     matrix: CSRMatrixF64, load: Span<f64>
 ) -> Result<u64, MechanicsError> {
     if (dofs == 0) { return Err(MechanicsInvalidDimension); }
-    let validation: Result<u64, NumericsError> = freshet_numerics::csr_validate(matrix);
+    let validation: Result<u64, NumericsError> =
+        freshet_numerics::csr_validate(matrix);
+
     match (validation) {
-        Ok(count) => { if (count != matrix.nnz) { return Err(MechanicsDimensionMismatch); } }
+        Ok(count) => {
+            if (count != matrix.nnz) { return Err(MechanicsDimensionMismatch); }
+        }
+
         Err(error) => { return Err(MechanicsDimensionMismatch); }
     }
+
     if (matrix.rows != dofs || matrix.cols != dofs || constrained.len != dofs ||
-        prescribed.len != dofs || load.len != dofs) { return Err(MechanicsDimensionMismatch); }
-    for (i in 0..load.len) { if (!mechanics_finite_f64(load.ptr[i])) { return Err(MechanicsNonFiniteInput); } }
-    for (i in 0..prescribed.len) { if (!mechanics_finite_f64(prescribed.ptr[i])) { return Err(MechanicsNonFiniteInput); } }
+        prescribed.len != dofs || load.len != dofs) {
+        return Err(MechanicsDimensionMismatch);
+    }
+
+    for (i in 0..load.len) {
+        if (!mechanics_finite_f64(load.ptr[i])) {
+            return Err(MechanicsNonFiniteInput);
+        }
+    }
+
+    for (i in 0..prescribed.len) {
+        if (!mechanics_finite_f64(prescribed.ptr[i])) {
+            return Err(MechanicsNonFiniteInput);
+        }
+    }
+
     let mut values_ptr: *f64 = matrix.values.ptr;
     let mut load_ptr: *f64 = load.ptr;
+
     for (fixed in 0..dofs) {
         if (constrained.ptr[fixed]) {
             let value: f64 = prescribed.ptr[fixed];
+
             for (row in 0..dofs) {
                 if (row != fixed) {
-                    for (entry in matrix.row_offsets[row]..matrix.row_offsets[row + 1]) {
+                    for (entry in matrix.row_offsets[row]..matrix.row_offsets[row +
+                        1]) {
                         if (matrix.col_indices.ptr[entry] == fixed) {
-                            load_ptr[row] = load_ptr[row] - values_ptr[entry] * value;
+                            load_ptr[row] = load_ptr[row] - values_ptr[entry] *
+                                value;
                             values_ptr[entry] = 0.0;
                         }
                     }
                 }
             }
+
             let mut has_diagonal: bool = false;
-            for (entry in matrix.row_offsets[fixed]..matrix.row_offsets[fixed + 1]) {
+
+            for (entry in matrix.row_offsets[fixed]..matrix.row_offsets[fixed +
+                1]) {
                 if (matrix.col_indices.ptr[entry] == fixed) {
                     values_ptr[entry] = 1.0;
                     has_diagonal = true;
-                } else {
-                    values_ptr[entry] = 0.0;
-                }
+                } else { values_ptr[entry] = 0.0; }
             }
+
             if (!has_diagonal) { return Err(SingularSystem); }
             load_ptr[fixed] = value;
         }
     }
-    for (i in 0..load.len) { if (!mechanics_finite_f64(load_ptr[i])) { return Err(MechanicsNonFiniteResult); } }
+
+    for (i in 0..load.len) {
+        if (!mechanics_finite_f64(load_ptr[i])) {
+            return Err(MechanicsNonFiniteResult);
+        }
+    }
+
     return Ok(dofs);
 }
 
@@ -256,12 +368,23 @@ pub fn solve_sparse_system_pcg_f64(
     residual: Span<f64>, z: Span<f64>, direction: Span<f64>, product: Span<f64>,
     inverse_diagonal: Span<f64>, max_iterations: u64, tolerance: f64
 ) -> Result<CGReport, MechanicsError> {
-    let diagonal: Result<u64, NumericsError> = freshet_numerics::csr_inverse_diagonal_f64(matrix, inverse_diagonal);
-    match (diagonal) { Ok(count) => {} Err(error) => { return Err(LinearSolverFailed); } }
-    let preconditioner: JacobiPreconditionerF64 = JacobiPreconditionerF64 { inverse_diagonal: inverse_diagonal };
-    let solved: Result<CGReport, NumericsError> = freshet_numerics::preconditioned_conjugate_gradient_f64(
-        matrix, preconditioner, matrix.rows, load, displacement, residual, z, direction, product,
-        max_iterations, tolerance);
+    let diagonal: Result<u64, NumericsError> =
+        freshet_numerics::csr_inverse_diagonal_f64(matrix, inverse_diagonal);
+
+    match (diagonal) {
+        Ok(count) => { }
+        Err(error) => { return Err(LinearSolverFailed); }
+    }
+
+    let preconditioner: JacobiPreconditionerF64 = JacobiPreconditionerF64 {
+        inverse_diagonal: inverse_diagonal
+    };
+
+    let solved: Result<CGReport, NumericsError> =
+        freshet_numerics::preconditioned_conjugate_gradient_f64(
+            matrix, preconditioner, matrix.rows, load, displacement, residual,
+            z, direction, product, max_iterations, tolerance);
+
     match (solved) {
         Ok(report) => { return Ok(report); }
         Err(error) => { return Err(LinearSolverFailed); }
@@ -278,22 +401,37 @@ pub fn support_reactions_f64(
     constrained: Span<bool>, reactions: Span<f64>
 ) -> Result<u64, MechanicsError> {
     if (dofs == 0) { return Err(MechanicsInvalidDimension); }
+
     if (matrix.rows != dofs || matrix.cols != dofs || displacement.len != dofs ||
-        load.len != dofs || constrained.len != dofs || reactions.len != dofs) { return Err(MechanicsDimensionMismatch); }
-    let product: Result<u64, NumericsError> = freshet_numerics::csr_matvec_f64(matrix, displacement, reactions);
+        load.len != dofs || constrained.len != dofs || reactions.len != dofs) {
+        return Err(MechanicsDimensionMismatch);
+    }
+
+    let product: Result<u64, NumericsError> = freshet_numerics::csr_matvec_f64(
+            matrix, displacement, reactions);
+
     match (product) {
-        Ok(count) => { if (count != dofs) { return Err(MechanicsDimensionMismatch); } }
+        Ok(count) => {
+            if (count != dofs) { return Err(MechanicsDimensionMismatch); }
+        }
+
         Err(error) => { return Err(LinearSolverFailed); }
     }
+
     let mut reactions_ptr: *f64 = reactions.ptr;
+
     for (dof in 0..dofs) {
         if (constrained.ptr[dof]) {
             reactions_ptr[dof] = reactions_ptr[dof] - load.ptr[dof];
-        } else {
-            reactions_ptr[dof] = 0.0;
+        } else { reactions_ptr[dof] = 0.0; }
+    }
+
+    for (i in 0..reactions.len) {
+        if (!mechanics_finite_f64(reactions_ptr[i])) {
+            return Err(MechanicsNonFiniteResult);
         }
     }
-    for (i in 0..reactions.len) { if (!mechanics_finite_f64(reactions_ptr[i])) { return Err(MechanicsNonFiniteResult); } }
+
     return Ok(dofs);
 }
 
@@ -304,34 +442,64 @@ pub fn element_axial_results_2d(
     coordinates_m: Span<f64>, connectivity: Span<u64>, displacement: Span<f64>,
     young_modulus_pa: Span<f64>, cross_section_area_m2: Span<f64>, element: u64
 ) -> Result<TrussElementResults, MechanicsError> {
-    if (element >= connectivity.len / 2) { return Err(MechanicsInvalidDimension); }
+    if (element >= connectivity.len / 2) {
+        return Err(MechanicsInvalidDimension);
+    }
+
     let node_count: u64 = coordinates_m.len / 2;
-    if (node_count < 2 || displacement.len != global_dof_count_2d(node_count)?) { return Err(MechanicsDimensionMismatch); }
-    if (young_modulus_pa.len != connectivity.len / 2 || cross_section_area_m2.len != connectivity.len / 2) { return Err(MechanicsDimensionMismatch); }
+
+    if (node_count < 2 || displacement.len != global_dof_count_2d(node_count)?) {
+        return Err(MechanicsDimensionMismatch);
+    }
+
+    if (young_modulus_pa.len != connectivity.len / 2 ||
+        cross_section_area_m2.len != connectivity.len / 2) {
+        return Err(MechanicsDimensionMismatch);
+    }
+
     let a: u64 = connectivity.ptr[2 * element];
     let b: u64 = connectivity.ptr[2 * element + 1];
-    if (a >= node_count || b >= node_count || a == b) { return Err(InvalidGeometry); }
-    let x1: f64 = coordinates_m.ptr[2 * a]; let y1: f64 = coordinates_m.ptr[2 * a + 1];
-    let x2: f64 = coordinates_m.ptr[2 * b]; let y2: f64 = coordinates_m.ptr[2 * b + 1];
-    let ux1: f64 = displacement.ptr[2 * a]; let uy1: f64 = displacement.ptr[2 * a + 1];
-    let ux2: f64 = displacement.ptr[2 * b]; let uy2: f64 = displacement.ptr[2 * b + 1];
-    let force: Result<f64, MechanicsError> = truss_axial_force_2d(x1, y1, x2, y2, ux1, uy1, ux2, uy2,
-        young_modulus_pa.ptr[element], cross_section_area_m2.ptr[element]);
+
+    if (a >= node_count || b >= node_count || a == b) {
+        return Err(InvalidGeometry);
+    }
+
+    let x1: f64 = coordinates_m.ptr[2 * a];
+    let y1: f64 = coordinates_m.ptr[2 * a + 1];
+    let x2: f64 = coordinates_m.ptr[2 * b];
+    let y2: f64 = coordinates_m.ptr[2 * b + 1];
+    let ux1: f64 = displacement.ptr[2 * a];
+    let uy1: f64 = displacement.ptr[2 * a + 1];
+    let ux2: f64 = displacement.ptr[2 * b];
+    let uy2: f64 = displacement.ptr[2 * b + 1];
+    let force: Result<f64, MechanicsError> = truss_axial_force_2d(
+            x1, y1, x2, y2, ux1, uy1, ux2, uy2, young_modulus_pa.ptr[element],
+            cross_section_area_m2.ptr[element]);
     // let requires an initializer; the match arm then assigns the unwrapped
     // value (the declare-with-default-then-match-assign corpus shape).
     let mut axial_force: f64 = 0.0;
+
     match (force) {
         Ok(value) => { axial_force = value; }
         Err(error) => { return Err(error); }
     }
+
     let length: f64 = norm2(Vector2 { x: x2 - x1, y: y2 - y1 })?;
-    if (!mechanics_finite_f64(length) || length <= 0.0) { return Err(InvalidGeometry); }
+
+    if (!mechanics_finite_f64(length) || length <= 0.0) {
+        return Err(InvalidGeometry);
+    }
+
     let area: f64 = cross_section_area_m2.ptr[element];
     let modulus: f64 = young_modulus_pa.ptr[element];
     if (area <= 0.0 || modulus <= 0.0) { return Err(InvalidMaterial); }
     let stress: f64 = axial_force / area;
     let strain: f64 = axial_force / (modulus * area);
-    if (!mechanics_finite_f64(stress) || !mechanics_finite_f64(strain)) { return Err(MechanicsNonFiniteResult); }
+
+    if (!mechanics_finite_f64(stress) || !mechanics_finite_f64(strain)) {
+        return Err(MechanicsNonFiniteResult);
+    }
+
     return Ok(TrussElementResults {
         axial_force_n: axial_force, axial_stress_pa: stress,
         axial_strain: strain, length_m: length
@@ -344,23 +512,59 @@ pub fn element_axial_results_3d(
     coordinates_m: Span<f64>, connectivity: Span<u64>, displacement: Span<f64>,
     young_modulus_pa: Span<f64>, cross_section_area_m2: Span<f64>, element: u64
 ) -> Result<TrussElementResults, MechanicsError> {
-    if (element >= connectivity.len / 2) { return Err(MechanicsInvalidDimension); }
+    if (element >= connectivity.len / 2) {
+        return Err(MechanicsInvalidDimension);
+    }
+
     let node_count: u64 = coordinates_m.len / 3;
-    if (node_count < 2 || displacement.len != global_dof_count_3d(node_count)?) { return Err(MechanicsDimensionMismatch); }
-    if (young_modulus_pa.len != connectivity.len / 2 || cross_section_area_m2.len != connectivity.len / 2) { return Err(MechanicsDimensionMismatch); }
+
+    if (node_count < 2 || displacement.len != global_dof_count_3d(node_count)?) {
+        return Err(MechanicsDimensionMismatch);
+    }
+
+    if (young_modulus_pa.len != connectivity.len / 2 ||
+        cross_section_area_m2.len != connectivity.len / 2) {
+        return Err(MechanicsDimensionMismatch);
+    }
+
     let a: u64 = connectivity.ptr[2 * element];
     let b: u64 = connectivity.ptr[2 * element + 1];
-    if (a >= node_count || b >= node_count || a == b) { return Err(InvalidGeometry); }
-    let x1: f64 = coordinates_m.ptr[3 * a]; let y1: f64 = coordinates_m.ptr[3 * a + 1]; let z1: f64 = coordinates_m.ptr[3 * a + 2];
-    let x2: f64 = coordinates_m.ptr[3 * b]; let y2: f64 = coordinates_m.ptr[3 * b + 1]; let z2: f64 = coordinates_m.ptr[3 * b + 2];
-    let ux1: f64 = displacement.ptr[3 * a]; let uy1: f64 = displacement.ptr[3 * a + 1]; let uz1: f64 = displacement.ptr[3 * a + 2];
-    let ux2: f64 = displacement.ptr[3 * b]; let uy2: f64 = displacement.ptr[3 * b + 1]; let uz2: f64 = displacement.ptr[3 * b + 2];
-    if (!mechanics_finite_f64(ux1) || !mechanics_finite_f64(uy1) || !mechanics_finite_f64(uz1) ||
-        !mechanics_finite_f64(ux2) || !mechanics_finite_f64(uy2) || !mechanics_finite_f64(uz2)) { return Err(MechanicsNonFiniteInput); }
-    let dx: f64 = x2 - x1; let dy: f64 = y2 - y1; let dz: f64 = z2 - z1;
+
+    if (a >= node_count || b >= node_count || a == b) {
+        return Err(InvalidGeometry);
+    }
+
+    let x1: f64 = coordinates_m.ptr[3 * a];
+    let y1: f64 = coordinates_m.ptr[3 * a + 1];
+    let z1: f64 = coordinates_m.ptr[3 * a + 2];
+    let x2: f64 = coordinates_m.ptr[3 * b];
+    let y2: f64 = coordinates_m.ptr[3 * b + 1];
+    let z2: f64 = coordinates_m.ptr[3 * b + 2];
+    let ux1: f64 = displacement.ptr[3 * a];
+    let uy1: f64 = displacement.ptr[3 * a + 1];
+    let uz1: f64 = displacement.ptr[3 * a + 2];
+    let ux2: f64 = displacement.ptr[3 * b];
+    let uy2: f64 = displacement.ptr[3 * b + 1];
+    let uz2: f64 = displacement.ptr[3 * b + 2];
+
+    if (!mechanics_finite_f64(ux1) || !mechanics_finite_f64(uy1) ||
+        !mechanics_finite_f64(uz1) || !mechanics_finite_f64(ux2) ||
+        !mechanics_finite_f64(uy2) || !mechanics_finite_f64(uz2)) {
+        return Err(MechanicsNonFiniteInput);
+    }
+
+    let dx: f64 = x2 - x1;
+    let dy: f64 = y2 - y1;
+    let dz: f64 = z2 - z1;
     let length: f64 = norm3(Vector3 { x: dx, y: dy, z: dz })?;
-    if (!mechanics_finite_f64(length) || length <= 0.0) { return Err(InvalidGeometry); }
-    let c: f64 = dx / length; let s: f64 = dy / length; let t: f64 = dz / length;
+
+    if (!mechanics_finite_f64(length) || length <= 0.0) {
+        return Err(InvalidGeometry);
+    }
+
+    let c: f64 = dx / length;
+    let s: f64 = dy / length;
+    let t: f64 = dz / length;
     let extension: f64 = (ux2 - ux1) * c + (uy2 - uy1) * s + (uz2 - uz1) * t;
     let area: f64 = cross_section_area_m2.ptr[element];
     let modulus: f64 = young_modulus_pa.ptr[element];
@@ -368,7 +572,10 @@ pub fn element_axial_results_3d(
     let axial_force: f64 = modulus * area * extension / length;
     let stress: f64 = axial_force / area;
     let strain: f64 = axial_force / (modulus * area);
-    if (!mechanics_finite_f64(axial_force) || !mechanics_finite_f64(stress) || !mechanics_finite_f64(strain)) { return Err(MechanicsNonFiniteResult); }
+
+    if (!mechanics_finite_f64(axial_force) || !mechanics_finite_f64(stress) ||
+        !mechanics_finite_f64(strain)) { return Err(MechanicsNonFiniteResult); }
+
     return Ok(TrussElementResults {
         axial_force_n: axial_force, axial_stress_pa: stress,
         axial_strain: strain, length_m: length
@@ -377,14 +584,17 @@ pub fn element_axial_results_3d(
 
 fn equilibrium_scale(load: Span<f64>, reactions: Span<f64>) -> f64 {
     let mut scale: f64 = 1.0;
+
     for (i in 0..load.len) {
         let value: f64 = fabs(load.ptr[i]);
         if (value > scale) { scale = value; }
     }
+
     for (i in 0..reactions.len) {
         let value: f64 = fabs(reactions.ptr[i]);
         if (value > scale) { scale = value; }
     }
+
     return scale;
 }
 
@@ -393,42 +603,67 @@ fn equilibrium_scale(load: Span<f64>, reactions: Span<f64>) -> f64 {
 // equilibrated static solution. tolerance is relative to the largest load or
 // reaction magnitude (with an absolute floor of one).
 pub fn equilibrium_check_2d(
-    node_count: u64, matrix: CSRMatrixF64, displacement: Span<f64>, load: Span<f64>,
-    constrained: Span<bool>, reactions: Span<f64>, scratch: Span<f64>, tolerance: f64
+    node_count: u64, matrix: CSRMatrixF64, displacement: Span<f64>,
+    load: Span<f64>, constrained: Span<bool>, reactions: Span<f64>,
+    scratch: Span<f64>, tolerance: f64
 ) -> Result<EquilibriumReport, MechanicsError> {
     let dofs: u64 = global_dof_count_2d(node_count)?;
+
     if (displacement.len != dofs || load.len != dofs || constrained.len != dofs ||
-        reactions.len != dofs || scratch.len != dofs) { return Err(MechanicsDimensionMismatch); }
-    if (!mechanics_finite_f64(tolerance) || tolerance < 0.0) { return Err(MechanicsInvalidDimension); }
-    let product: Result<u64, NumericsError> = freshet_numerics::csr_matvec_f64(matrix, displacement, scratch);
+        reactions.len != dofs || scratch.len != dofs) {
+        return Err(MechanicsDimensionMismatch);
+    }
+
+    if (!mechanics_finite_f64(tolerance) || tolerance < 0.0) {
+        return Err(MechanicsInvalidDimension);
+    }
+
+    let product: Result<u64, NumericsError> = freshet_numerics::csr_matvec_f64(
+            matrix, displacement, scratch);
+
     match (product) {
-        Ok(count) => { if (count != dofs) { return Err(MechanicsDimensionMismatch); } }
+        Ok(count) => {
+            if (count != dofs) { return Err(MechanicsDimensionMismatch); }
+        }
+
         Err(error) => { return Err(LinearSolverFailed); }
     }
+
     let mut residual_norm: f64 = 0.0;
     let mut residual_max: f64 = 0.0;
     let mut sum_x: f64 = 0.0;
     let mut sum_y: f64 = 0.0;
+
     for (dof in 0..dofs) {
         let value: f64 = scratch.ptr[dof] - load.ptr[dof];
-        if (!mechanics_finite_f64(value)) { return Err(MechanicsNonFiniteResult); }
+
+        if (!mechanics_finite_f64(value)) {
+            return Err(MechanicsNonFiniteResult);
+        }
+
         if (!constrained.ptr[dof]) {
             residual_norm = residual_norm + value * value;
             let absolute: f64 = fabs(value);
             if (absolute > residual_max) { residual_max = absolute; }
         }
     }
+
     residual_norm = sqrt(residual_norm);
+
     for (node in 0..node_count) {
         sum_x = sum_x + load.ptr[2 * node] + reactions.ptr[2 * node];
         sum_y = sum_y + load.ptr[2 * node + 1] + reactions.ptr[2 * node + 1];
     }
+
     let scale: f64 = equilibrium_scale(load, reactions);
     let mut ok: bool = true;
     if (residual_norm > tolerance * scale) { ok = false; }
     if (fabs(sum_x) > tolerance * scale) { ok = false; }
     if (fabs(sum_y) > tolerance * scale) { ok = false; }
-    if (!mechanics_finite_f64(residual_norm) || !mechanics_finite_f64(sum_x) || !mechanics_finite_f64(sum_y)) { return Err(MechanicsNonFiniteResult); }
+
+    if (!mechanics_finite_f64(residual_norm) || !mechanics_finite_f64(sum_x) ||
+        !mechanics_finite_f64(sum_y)) { return Err(MechanicsNonFiniteResult); }
+
     return Ok(EquilibriumReport {
         residual_norm: residual_norm, residual_max: residual_max,
         load_reaction_sum_x: sum_x, load_reaction_sum_y: sum_y,
@@ -438,46 +673,72 @@ pub fn equilibrium_check_2d(
 
 // Global equilibrium check for a solved 3D truss; see equilibrium_check_2d.
 pub fn equilibrium_check_3d(
-    node_count: u64, matrix: CSRMatrixF64, displacement: Span<f64>, load: Span<f64>,
-    constrained: Span<bool>, reactions: Span<f64>, scratch: Span<f64>, tolerance: f64
+    node_count: u64, matrix: CSRMatrixF64, displacement: Span<f64>,
+    load: Span<f64>, constrained: Span<bool>, reactions: Span<f64>,
+    scratch: Span<f64>, tolerance: f64
 ) -> Result<EquilibriumReport, MechanicsError> {
     let dofs: u64 = global_dof_count_3d(node_count)?;
+
     if (displacement.len != dofs || load.len != dofs || constrained.len != dofs ||
-        reactions.len != dofs || scratch.len != dofs) { return Err(MechanicsDimensionMismatch); }
-    if (!mechanics_finite_f64(tolerance) || tolerance < 0.0) { return Err(MechanicsInvalidDimension); }
-    let product: Result<u64, NumericsError> = freshet_numerics::csr_matvec_f64(matrix, displacement, scratch);
+        reactions.len != dofs || scratch.len != dofs) {
+        return Err(MechanicsDimensionMismatch);
+    }
+
+    if (!mechanics_finite_f64(tolerance) || tolerance < 0.0) {
+        return Err(MechanicsInvalidDimension);
+    }
+
+    let product: Result<u64, NumericsError> = freshet_numerics::csr_matvec_f64(
+            matrix, displacement, scratch);
+
     match (product) {
-        Ok(count) => { if (count != dofs) { return Err(MechanicsDimensionMismatch); } }
+        Ok(count) => {
+            if (count != dofs) { return Err(MechanicsDimensionMismatch); }
+        }
+
         Err(error) => { return Err(LinearSolverFailed); }
     }
+
     let mut residual_norm: f64 = 0.0;
     let mut residual_max: f64 = 0.0;
     let mut sum_x: f64 = 0.0;
     let mut sum_y: f64 = 0.0;
     let mut sum_z: f64 = 0.0;
+
     for (dof in 0..dofs) {
         let value: f64 = scratch.ptr[dof] - load.ptr[dof];
-        if (!mechanics_finite_f64(value)) { return Err(MechanicsNonFiniteResult); }
+
+        if (!mechanics_finite_f64(value)) {
+            return Err(MechanicsNonFiniteResult);
+        }
+
         if (!constrained.ptr[dof]) {
             residual_norm = residual_norm + value * value;
             let absolute: f64 = fabs(value);
             if (absolute > residual_max) { residual_max = absolute; }
         }
     }
+
     residual_norm = sqrt(residual_norm);
+
     for (node in 0..node_count) {
         sum_x = sum_x + load.ptr[3 * node] + reactions.ptr[3 * node];
         sum_y = sum_y + load.ptr[3 * node + 1] + reactions.ptr[3 * node + 1];
         sum_z = sum_z + load.ptr[3 * node + 2] + reactions.ptr[3 * node + 2];
     }
+
     let scale: f64 = equilibrium_scale(load, reactions);
     let mut ok: bool = true;
     if (residual_norm > tolerance * scale) { ok = false; }
     if (fabs(sum_x) > tolerance * scale) { ok = false; }
     if (fabs(sum_y) > tolerance * scale) { ok = false; }
     if (fabs(sum_z) > tolerance * scale) { ok = false; }
+
     if (!mechanics_finite_f64(residual_norm) || !mechanics_finite_f64(sum_x) ||
-        !mechanics_finite_f64(sum_y) || !mechanics_finite_f64(sum_z)) { return Err(MechanicsNonFiniteResult); }
+        !mechanics_finite_f64(sum_y) || !mechanics_finite_f64(sum_z)) {
+        return Err(MechanicsNonFiniteResult);
+    }
+
     return Ok(EquilibriumReport {
         residual_norm: residual_norm, residual_max: residual_max,
         load_reaction_sum_x: sum_x, load_reaction_sum_y: sum_y,

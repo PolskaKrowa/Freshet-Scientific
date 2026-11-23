@@ -35,7 +35,9 @@ pub fn reader_stdin() -> Reader {
     return r;
 }
 
-pub fn reader_read(borrowed mut r: Reader, buf: Span<u8>) -> Result<usize, IoError> {
+pub fn reader_read(
+    borrowed mut r: Reader, buf: Span<u8>
+) -> Result<usize, IoError> {
     let n: i64 = frt_reader_read(&mut r, buf.ptr, buf.len);
     if (n >= 0) { return Ok(n as usize); }
     return Err(io_err(0 - n));
@@ -59,7 +61,9 @@ pub fn writer_open(path: str) -> Result<Writer, IoError> {
     return Err(io_err(e));
 }
 
-pub fn writer_write(borrowed mut w: Writer, data: str) -> Result<usize, IoError> {
+pub fn writer_write(
+    borrowed mut w: Writer, data: str
+) -> Result<usize, IoError> {
     let n: i64 = frt_writer_write(&mut w, data);
     if (n >= 0) { return Ok(n as usize); }
     return Err(io_err(0 - n));

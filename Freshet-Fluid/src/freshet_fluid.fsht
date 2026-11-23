@@ -2,50 +2,33 @@
 module freshet_fluid;
 
 pub enum FluidError {
-    InvalidGrid,
-    InvalidSpacing,
-    InvalidTimestep,
-    InvalidDensity,
-    InvalidViscosity,
-    InvalidCfl,
-    InvalidTolerance,
-    InvalidBoundarySet,
-    IncompatibleBoundaryFlux,
-    InvalidRelaxation,
-    DimensionMismatch,
-    SizeOverflow,
-    NonFiniteInput,
-    NonFiniteResult,
-    PressureNotConverged,
+    InvalidGrid, InvalidSpacing, InvalidTimestep, InvalidDensity,
+    InvalidViscosity, InvalidCfl, InvalidTolerance, InvalidBoundarySet,
+    IncompatibleBoundaryFlux, InvalidRelaxation, DimensionMismatch,
+    SizeOverflow, NonFiniteInput, NonFiniteResult, PressureNotConverged,
     PressureCgBreakdown
 }
 
 pub enum BoundaryKind { Dirichlet, Neumann, Periodic, Wall, Inflow, Outflow }
 
 pub struct BoundaryCondition2D {
-    kind: BoundaryKind,
-    normal_velocity: f64,
-    tangential_velocity: f64,
-    pressure_value: f64,
-    pressure_gradient: f64
+    kind: BoundaryKind, normal_velocity: f64, tangential_velocity: f64,
+    pressure_value: f64, pressure_gradient: f64
 }
 
 pub struct MACBoundaryConditions2D {
-    left: BoundaryCondition2D,
-    right: BoundaryCondition2D,
-    bottom: BoundaryCondition2D,
-    top: BoundaryCondition2D
+    left: BoundaryCondition2D, right: BoundaryCondition2D,
+    bottom: BoundaryCondition2D, top: BoundaryCondition2D
 }
 
 pub struct ProjectionReport {
-    iterations: u64,
-    pressure_residual: f64,
-    initial_divergence_max: f64,
-    final_divergence_max: f64,
-    converged: bool
+    iterations: u64, pressure_residual: f64, initial_divergence_max: f64,
+    final_divergence_max: f64, converged: bool
 }
 
-fn finite_f64(value: f64) -> bool { return value - value == 0.0; }
+fn finite_f64(value: f64) -> bool {
+    return value - value == 0.0;
+}
 
 fn checked_fluid_size(value: Option<u64>) -> Result<u64, FluidError> {
     match (value) {
@@ -55,12 +38,18 @@ fn checked_fluid_size(value: Option<u64>) -> Result<u64, FluidError> {
 }
 
 fn validate_finite(values: Span<f64>) -> Result<u64, FluidError> {
-    for (i in 0..values.len) { if (!finite_f64(values.ptr[i])) { return Err(NonFiniteInput); } }
+    for (i in 0..values.len) {
+        if (!finite_f64(values.ptr[i])) { return Err(NonFiniteInput); }
+    }
+
     return Ok(values.len);
 }
 
 fn validate_finite_result(values: Span<f64>) -> Result<u64, FluidError> {
-    for (i in 0..values.len) { if (!finite_f64(values.ptr[i])) { return Err(NonFiniteResult); } }
+    for (i in 0..values.len) {
+        if (!finite_f64(values.ptr[i])) { return Err(NonFiniteResult); }
+    }
+
     return Ok(values.len);
 }
 
@@ -69,7 +58,9 @@ pub fn grid_cell_count_2d(nx: u64, ny: u64) -> Result<u64, FluidError> {
     return checked_fluid_size(checked_mul(nx, ny));
 }
 
-pub fn grid_cell_count_3d(nx: u64, ny: u64, nz: u64) -> Result<u64, FluidError> {
+pub fn grid_cell_count_3d(
+    nx: u64, ny: u64, nz: u64
+) -> Result<u64, FluidError> {
     if (nx < 3 || ny < 3 || nz < 3) { return Err(InvalidGrid); }
     let xy: u64 = checked_fluid_size(checked_mul(nx, ny))?;
     return checked_fluid_size(checked_mul(xy, nz));
@@ -87,21 +78,27 @@ pub fn mac_v_face_count_2d(nx: u64, ny: u64) -> Result<u64, FluidError> {
     return checked_fluid_size(checked_mul(nx, rows));
 }
 
-pub fn mac_u_face_count_3d(nx: u64, ny: u64, nz: u64) -> Result<u64, FluidError> {
+pub fn mac_u_face_count_3d(
+    nx: u64, ny: u64, nz: u64
+) -> Result<u64, FluidError> {
     if (nx < 3 || ny < 3 || nz < 3) { return Err(InvalidGrid); }
     let columns: u64 = checked_fluid_size(checked_add(nx, 1))?;
     let plane: u64 = checked_fluid_size(checked_mul(columns, ny))?;
     return checked_fluid_size(checked_mul(plane, nz));
 }
 
-pub fn mac_v_face_count_3d(nx: u64, ny: u64, nz: u64) -> Result<u64, FluidError> {
+pub fn mac_v_face_count_3d(
+    nx: u64, ny: u64, nz: u64
+) -> Result<u64, FluidError> {
     if (nx < 3 || ny < 3 || nz < 3) { return Err(InvalidGrid); }
     let rows: u64 = checked_fluid_size(checked_add(ny, 1))?;
     let plane: u64 = checked_fluid_size(checked_mul(nx, rows))?;
     return checked_fluid_size(checked_mul(plane, nz));
 }
 
-pub fn mac_w_face_count_3d(nx: u64, ny: u64, nz: u64) -> Result<u64, FluidError> {
+pub fn mac_w_face_count_3d(
+    nx: u64, ny: u64, nz: u64
+) -> Result<u64, FluidError> {
     if (nx < 3 || ny < 3 || nz < 3) { return Err(InvalidGrid); }
     let layers: u64 = checked_fluid_size(checked_add(nz, 1))?;
     let plane: u64 = checked_fluid_size(checked_mul(nx, ny))?;
@@ -111,15 +108,23 @@ pub fn mac_w_face_count_3d(nx: u64, ny: u64, nz: u64) -> Result<u64, FluidError>
 // 3D MAC divergence. Pressure/cell scalars use nx*ny*nz entries; each
 // velocity component is stored on its corresponding staggered face lattice.
 pub fn mac_divergence_3d(
-    nx: u64, ny: u64, nz: u64, dx: f64, dy: f64, dz: f64,
-    u_faces: Span<f64>, v_faces: Span<f64>, w_faces: Span<f64>, divergence: Span<f64>
+    nx: u64, ny: u64, nz: u64, dx: f64, dy: f64, dz: f64, u_faces: Span<f64>,
+    v_faces: Span<f64>, w_faces: Span<f64>, divergence: Span<f64>
 ) -> Result<u64, FluidError> {
-    if (!finite_f64(dx) || !finite_f64(dy) || !finite_f64(dz) || dx <= 0.0 || dy <= 0.0 || dz <= 0.0) { return Err(InvalidSpacing); }
+    if (!finite_f64(dx) || !finite_f64(dy) || !finite_f64(dz) || dx <= 0.0 || dy <=
+        0.0 || dz <= 0.0) { return Err(InvalidSpacing); }
+
     let cells: u64 = grid_cell_count_3d(nx, ny, nz)?;
-    if (u_faces.len != mac_u_face_count_3d(nx, ny, nz)? ||
-        v_faces.len != mac_v_face_count_3d(nx, ny, nz)? ||
-        w_faces.len != mac_w_face_count_3d(nx, ny, nz)? || divergence.len != cells) { return Err(DimensionMismatch); }
-    validate_finite(u_faces)?; validate_finite(v_faces)?; validate_finite(w_faces)?;
+
+    if (u_faces.len != mac_u_face_count_3d(nx, ny, nz)? || v_faces.len !=
+        mac_v_face_count_3d(nx, ny, nz)? || w_faces.len != mac_w_face_count_3d(
+            nx, ny, nz)? || divergence.len != cells) {
+        return Err(DimensionMismatch);
+    }
+
+    validate_finite(u_faces)?;
+    validate_finite(v_faces)?;
+    validate_finite(w_faces)?;
     let mut output_ptr: *f64 = divergence.ptr;
     let u_stride_y: u64 = nx + 1;
     let u_stride_z: u64 = (nx + 1) * ny;
@@ -127,6 +132,7 @@ pub fn mac_divergence_3d(
     let v_stride_z: u64 = nx * (ny + 1);
     let w_stride_y: u64 = nx;
     let w_stride_z: u64 = nx * ny;
+
     parfor (layer in 0..nz) {
         for (row in 0..ny) {
             for (col in 0..nx) {
@@ -134,18 +140,21 @@ pub fn mac_divergence_3d(
                 let u_base: u64 = layer * u_stride_z + row * u_stride_y + col;
                 let v_base: u64 = layer * v_stride_z + row * v_stride_y + col;
                 let w_base: u64 = layer * w_stride_z + row * w_stride_y + col;
-                output_ptr[cell] = (u_faces.ptr[u_base + 1] - u_faces.ptr[u_base]) / dx +
-                                   (v_faces.ptr[v_base + nx] - v_faces.ptr[v_base]) / dy +
-                                   (w_faces.ptr[w_base + nx * ny] - w_faces.ptr[w_base]) / dz;
+                output_ptr[cell] =
+                    (u_faces.ptr[u_base + 1] - u_faces.ptr[u_base]) / dx +
+                    (v_faces.ptr[v_base + nx] - v_faces.ptr[v_base]) / dy +
+                    (w_faces.ptr[w_base + nx * ny] - w_faces.ptr[w_base]) / dz;
             }
         }
     }
+
     validate_finite_result(divergence)?;
     return Ok(cells);
 }
 
 fn is_periodic(kind: BoundaryKind) -> bool {
     let mut result: bool = false;
+
     match (kind) {
         Periodic => { result = true; }
         Dirichlet => { result = false; }
@@ -154,11 +163,13 @@ fn is_periodic(kind: BoundaryKind) -> bool {
         Inflow => { result = false; }
         Outflow => { result = false; }
     }
+
     return result;
 }
 
 fn is_pressure_dirichlet(kind: BoundaryKind) -> bool {
     let mut result: bool = false;
+
     match (kind) {
         Dirichlet => { result = true; }
         Outflow => { result = true; }
@@ -167,11 +178,13 @@ fn is_pressure_dirichlet(kind: BoundaryKind) -> bool {
         Periodic => { result = false; }
         Inflow => { result = false; }
     }
+
     return result;
 }
 
 fn is_neumann(kind: BoundaryKind) -> bool {
     let mut result: bool = false;
+
     match (kind) {
         Neumann => { result = true; }
         Dirichlet => { result = false; }
@@ -180,11 +193,13 @@ fn is_neumann(kind: BoundaryKind) -> bool {
         Inflow => { result = true; }
         Outflow => { result = false; }
     }
+
     return result;
 }
 
 fn prescribes_tangential_velocity(kind: BoundaryKind) -> bool {
     let mut result: bool = false;
+
     match (kind) {
         Wall => { result = true; }
         Dirichlet => { result = true; }
@@ -193,71 +208,119 @@ fn prescribes_tangential_velocity(kind: BoundaryKind) -> bool {
         Periodic => { result = false; }
         Outflow => { result = false; }
     }
+
     return result;
 }
 
-fn validate_boundaries(boundaries: MACBoundaryConditions2D) -> Result<u64, FluidError> {
-    if (is_periodic(boundaries.left.kind) != is_periodic(boundaries.right.kind)) { return Err(InvalidBoundarySet); }
-    if (is_periodic(boundaries.bottom.kind) != is_periodic(boundaries.top.kind)) { return Err(InvalidBoundarySet); }
-    if (!finite_f64(boundaries.left.normal_velocity) || !finite_f64(boundaries.left.tangential_velocity) ||
-        !finite_f64(boundaries.left.pressure_value) || !finite_f64(boundaries.left.pressure_gradient) ||
-        !finite_f64(boundaries.right.normal_velocity) || !finite_f64(boundaries.right.tangential_velocity) ||
-        !finite_f64(boundaries.right.pressure_value) || !finite_f64(boundaries.right.pressure_gradient) ||
-        !finite_f64(boundaries.bottom.normal_velocity) || !finite_f64(boundaries.bottom.tangential_velocity) ||
-        !finite_f64(boundaries.bottom.pressure_value) || !finite_f64(boundaries.bottom.pressure_gradient) ||
-        !finite_f64(boundaries.top.normal_velocity) || !finite_f64(boundaries.top.tangential_velocity) ||
-        !finite_f64(boundaries.top.pressure_value) || !finite_f64(boundaries.top.pressure_gradient)) { return Err(NonFiniteInput); }
+fn validate_boundaries(
+    boundaries: MACBoundaryConditions2D
+) -> Result<u64, FluidError> {
+    if (is_periodic(boundaries.left.kind) != is_periodic(boundaries.right.kind)) {
+        return Err(InvalidBoundarySet);
+    }
+
+    if (is_periodic(boundaries.bottom.kind) != is_periodic(boundaries.top.kind)) {
+        return Err(InvalidBoundarySet);
+    }
+
+    if (!finite_f64(boundaries.left.normal_velocity) ||
+        !finite_f64(boundaries.left.tangential_velocity) ||
+        !finite_f64(boundaries.left.pressure_value) ||
+        !finite_f64(boundaries.left.pressure_gradient) ||
+        !finite_f64(boundaries.right.normal_velocity) ||
+        !finite_f64(boundaries.right.tangential_velocity) ||
+        !finite_f64(boundaries.right.pressure_value) ||
+        !finite_f64(boundaries.right.pressure_gradient) ||
+        !finite_f64(boundaries.bottom.normal_velocity) ||
+        !finite_f64(boundaries.bottom.tangential_velocity) ||
+        !finite_f64(boundaries.bottom.pressure_value) ||
+        !finite_f64(boundaries.bottom.pressure_gradient) ||
+        !finite_f64(boundaries.top.normal_velocity) ||
+        !finite_f64(boundaries.top.tangential_velocity) ||
+        !finite_f64(boundaries.top.pressure_value) ||
+        !finite_f64(boundaries.top.pressure_gradient)) {
+        return Err(NonFiniteInput);
+    }
+
     return Ok(1);
 }
 
 // Cell-centred divergence retained for collocated diagnostic fields only.
 // The pressure projection below does NOT use this operator.
 pub fn divergence_2d(
-    nx: u64, ny: u64, dx: f64, dy: f64,
-    u: Span<f64>, v: Span<f64>, output: Span<f64>
+    nx: u64, ny: u64, dx: f64, dy: f64, u: Span<f64>, v: Span<f64>,
+    output: Span<f64>
 ) -> Result<u64, FluidError> {
-    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) {
+        return Err(InvalidSpacing);
+    }
+
     let cells: u64 = grid_cell_count_2d(nx, ny)?;
-    if (u.len != cells || v.len != cells || output.len != cells) { return Err(DimensionMismatch); }
-    validate_finite(u)?; validate_finite(v)?;
+
+    if (u.len != cells || v.len != cells || output.len != cells) {
+        return Err(DimensionMismatch);
+    }
+
+    validate_finite(u)?;
+    validate_finite(v)?;
     let mut output_ptr: *f64 = output.ptr;
+
     parfor (row in 0..ny) {
         for (col in 0..nx) {
             let flat: u64 = row * nx + col;
-            if (row == 0 || row + 1 == ny || col == 0 || col + 1 == nx) { output_ptr[flat] = 0.0; }
-            else {
-                let du_dx: f64 = (u.ptr[flat + 1] - u.ptr[flat - 1]) / (2.0 * dx);
-                let dv_dy: f64 = (v.ptr[flat + nx] - v.ptr[flat - nx]) / (2.0 * dy);
+
+            if (row == 0 || row + 1 == ny || col == 0 || col + 1 == nx) {
+                output_ptr[flat] = 0.0;
+            } else {
+                let du_dx: f64 = (u.ptr[flat + 1] - u.ptr[flat - 1]) /
+                    (2.0 * dx);
+                let dv_dy: f64 = (v.ptr[flat + nx] - v.ptr[flat - nx]) /
+                    (2.0 * dy);
                 output_ptr[flat] = du_dx + dv_dy;
             }
         }
     }
+
     validate_finite_result(output)?;
     return Ok(cells);
 }
 
 pub fn laplacian_2d(
-    nx: u64, ny: u64, dx: f64, dy: f64,
-    field: Span<f64>, output: Span<f64>
+    nx: u64, ny: u64, dx: f64, dy: f64, field: Span<f64>, output: Span<f64>
 ) -> Result<u64, FluidError> {
-    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) {
+        return Err(InvalidSpacing);
+    }
+
     let cells: u64 = grid_cell_count_2d(nx, ny)?;
-    if (field.len != cells || output.len != cells) { return Err(DimensionMismatch); }
+
+    if (field.len != cells || output.len != cells) {
+        return Err(DimensionMismatch);
+    }
+
     validate_finite(field)?;
     let inv_dx2: f64 = 1.0 / (dx * dx);
     let inv_dy2: f64 = 1.0 / (dy * dy);
     let mut output_ptr: *f64 = output.ptr;
+
     parfor (row in 0..ny) {
         for (col in 0..nx) {
             let flat: u64 = row * nx + col;
-            if (row == 0 || row + 1 == ny || col == 0 || col + 1 == nx) { output_ptr[flat] = field.ptr[flat]; }
-            else {
-                let d2x: f64 = (field.ptr[flat + 1] - 2.0 * field.ptr[flat] + field.ptr[flat - 1]) * inv_dx2;
-                let d2y: f64 = (field.ptr[flat + nx] - 2.0 * field.ptr[flat] + field.ptr[flat - nx]) * inv_dy2;
+
+            if (row == 0 || row + 1 == ny || col == 0 || col + 1 == nx) {
+                output_ptr[flat] = field.ptr[flat];
+            } else {
+                let d2x: f64 =
+                    (field.ptr[flat + 1] - 2.0 * field.ptr[flat] +
+                    field.ptr[flat - 1]) * inv_dx2;
+                let d2y: f64 =
+                    (field.ptr[flat + nx] - 2.0 * field.ptr[flat] +
+                    field.ptr[flat - nx]) * inv_dy2;
                 output_ptr[flat] = d2x + d2y;
             }
         }
     }
+
     validate_finite_result(output)?;
     return Ok(cells);
 }
@@ -267,25 +330,40 @@ pub fn laplacian_2d(
 // boundary-cell interfaces. Each interior face flux is shared by both adjacent
 // active cells, so global scalar mass is conserved (up to round-off).
 pub fn transport_scalar_upwind_2d(
-    nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, viscosity: f64,
-    u: Span<f64>, v: Span<f64>, scalar: Span<f64>, output: Span<f64>
+    nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, viscosity: f64, u: Span<f64>,
+    v: Span<f64>, scalar: Span<f64>, output: Span<f64>
 ) -> Result<u64, FluidError> {
     if (!finite_f64(dt) || dt <= 0.0) { return Err(InvalidTimestep); }
-    if (!finite_f64(viscosity) || viscosity < 0.0) { return Err(InvalidViscosity); }
-    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+
+    if (!finite_f64(viscosity) || viscosity < 0.0) {
+        return Err(InvalidViscosity);
+    }
+
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) {
+        return Err(InvalidSpacing);
+    }
+
     let cells: u64 = grid_cell_count_2d(nx, ny)?;
-    if (u.len != cells || v.len != cells || scalar.len != cells || output.len != cells) { return Err(DimensionMismatch); }
-    validate_finite(u)?; validate_finite(v)?; validate_finite(scalar)?;
+
+    if (u.len != cells || v.len != cells || scalar.len != cells || output.len !=
+        cells) { return Err(DimensionMismatch); }
+
+    validate_finite(u)?;
+    validate_finite(v)?;
+    validate_finite(scalar)?;
     let inv_dx: f64 = 1.0 / dx;
     let inv_dy: f64 = 1.0 / dy;
     let inv_dx2: f64 = inv_dx * inv_dx;
     let inv_dy2: f64 = inv_dy * inv_dy;
     let mut output_ptr: *f64 = output.ptr;
+
     parfor (row in 0..ny) {
         for (col in 0..nx) {
             let flat: u64 = row * nx + col;
-            if (row == 0 || row + 1 == ny || col == 0 || col + 1 == nx) { output_ptr[flat] = scalar.ptr[flat]; }
-            else {
+
+            if (row == 0 || row + 1 == ny || col == 0 || col + 1 == nx) {
+                output_ptr[flat] = scalar.ptr[flat];
+            } else {
                 let u_right: f64 = 0.5 * (u.ptr[flat] + u.ptr[flat + 1]);
                 let u_left: f64 = 0.5 * (u.ptr[flat - 1] + u.ptr[flat]);
                 let v_top: f64 = 0.5 * (v.ptr[flat] + v.ptr[flat + nx]);
@@ -294,26 +372,55 @@ pub fn transport_scalar_upwind_2d(
                 let mut flux_left: f64 = u_left * scalar.ptr[flat];
                 let mut flux_top: f64 = v_top * scalar.ptr[flat + nx];
                 let mut flux_bottom: f64 = v_bottom * scalar.ptr[flat];
-                if (col + 2 == nx) { flux_right = 0.0; }
-                else if (u_right >= 0.0) { flux_right = u_right * scalar.ptr[flat]; }
-                if (col == 1) { flux_left = 0.0; }
-                else if (u_left >= 0.0) { flux_left = u_left * scalar.ptr[flat - 1]; }
-                if (row + 2 == ny) { flux_top = 0.0; }
-                else if (v_top >= 0.0) { flux_top = v_top * scalar.ptr[flat]; }
-                if (row == 1) { flux_bottom = 0.0; }
-                else if (v_bottom >= 0.0) { flux_bottom = v_bottom * scalar.ptr[flat - nx]; }
-                let advective: f64 = (flux_right - flux_left) * inv_dx + (flux_top - flux_bottom) * inv_dy;
+
+                if (col + 2 == nx) { flux_right = 0.0; } else if (u_right >= 0.0) {
+                    flux_right = u_right * scalar.ptr[flat];
+                }
+
+                if (col == 1) { flux_left = 0.0; } else if (u_left >= 0.0) {
+                    flux_left = u_left * scalar.ptr[flat - 1];
+                }
+
+                if (row + 2 == ny) { flux_top = 0.0; } else if (v_top >= 0.0) {
+                    flux_top = v_top * scalar.ptr[flat];
+                }
+
+                if (row == 1) { flux_bottom = 0.0; } else if (v_bottom >= 0.0) {
+                    flux_bottom = v_bottom * scalar.ptr[flat - nx];
+                }
+
+                let advective: f64 = (flux_right - flux_left) * inv_dx +
+                    (flux_top - flux_bottom) * inv_dy;
                 let mut diffusion_x: f64 = 0.0;
                 let mut diffusion_y: f64 = 0.0;
-                if (col + 2 < nx) { diffusion_x = diffusion_x + (scalar.ptr[flat + 1] - scalar.ptr[flat]) * inv_dx2; }
-                if (col > 1) { diffusion_x = diffusion_x - (scalar.ptr[flat] - scalar.ptr[flat - 1]) * inv_dx2; }
-                if (row + 2 < ny) { diffusion_y = diffusion_y + (scalar.ptr[flat + nx] - scalar.ptr[flat]) * inv_dy2; }
-                if (row > 1) { diffusion_y = diffusion_y - (scalar.ptr[flat] - scalar.ptr[flat - nx]) * inv_dy2; }
+
+                if (col + 2 < nx) {
+                    diffusion_x = diffusion_x +
+                        (scalar.ptr[flat + 1] - scalar.ptr[flat]) * inv_dx2;
+                }
+
+                if (col > 1) {
+                    diffusion_x = diffusion_x -
+                        (scalar.ptr[flat] - scalar.ptr[flat - 1]) * inv_dx2;
+                }
+
+                if (row + 2 < ny) {
+                    diffusion_y = diffusion_y +
+                        (scalar.ptr[flat + nx] - scalar.ptr[flat]) * inv_dy2;
+                }
+
+                if (row > 1) {
+                    diffusion_y = diffusion_y -
+                        (scalar.ptr[flat] - scalar.ptr[flat - nx]) * inv_dy2;
+                }
+
                 let laplace: f64 = diffusion_x + diffusion_y;
-                output_ptr[flat] = scalar.ptr[flat] - dt * advective + dt * viscosity * laplace;
+                output_ptr[flat] = scalar.ptr[flat] - dt * advective + dt *
+                    viscosity * laplace;
             }
         }
     }
+
     validate_finite_result(output)?;
     return Ok(cells);
 }
@@ -322,23 +429,39 @@ pub fn transport_scalar_upwind_2d(
 // shared face value for its two neighbouring cells, so the global advective
 // and diffusive flux sums telescope to zero (up to round-off).
 pub fn transport_scalar_periodic_2d(
-    nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, diffusivity: f64,
-    u: Span<f64>, v: Span<f64>, scalar: Span<f64>, output: Span<f64>
+    nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, diffusivity: f64, u: Span<f64>,
+    v: Span<f64>, scalar: Span<f64>, output: Span<f64>
 ) -> Result<u64, FluidError> {
-    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) {
+        return Err(InvalidSpacing);
+    }
+
     if (!finite_f64(dt) || dt <= 0.0) { return Err(InvalidTimestep); }
-    if (!finite_f64(diffusivity) || diffusivity < 0.0) { return Err(InvalidViscosity); }
+
+    if (!finite_f64(diffusivity) || diffusivity < 0.0) {
+        return Err(InvalidViscosity);
+    }
+
     let cells: u64 = grid_cell_count_2d(nx, ny)?;
-    if (u.len != cells || v.len != cells || scalar.len != cells || output.len != cells) { return Err(DimensionMismatch); }
-    validate_finite(u)?; validate_finite(v)?; validate_finite(scalar)?;
-    let inv_dx: f64 = 1.0 / dx; let inv_dy: f64 = 1.0 / dy;
-    let inv_dx2: f64 = inv_dx * inv_dx; let inv_dy2: f64 = inv_dy * inv_dy;
+
+    if (u.len != cells || v.len != cells || scalar.len != cells || output.len !=
+        cells) { return Err(DimensionMismatch); }
+
+    validate_finite(u)?;
+    validate_finite(v)?;
+    validate_finite(scalar)?;
+    let inv_dx: f64 = 1.0 / dx;
+    let inv_dy: f64 = 1.0 / dy;
+    let inv_dx2: f64 = inv_dx * inv_dx;
+    let inv_dy2: f64 = inv_dy * inv_dy;
     let mut output_ptr: *f64 = output.ptr;
+
     parfor (row in 0..ny) {
         let mut south_row: u64 = row;
         let mut north_row: u64 = row;
         if (row == 0) { south_row = ny - 1; } else { south_row = row - 1; }
         if (row + 1 == ny) { north_row = 0; } else { north_row = row + 1; }
+
         for (col in 0..nx) {
             let mut west_col: u64 = col;
             let mut east_col: u64 = col;
@@ -361,72 +484,113 @@ pub fn transport_scalar_periodic_2d(
             if (u_left >= 0.0) { flux_left = u_left * scalar.ptr[west]; }
             if (v_top >= 0.0) { flux_top = v_top * scalar.ptr[cell]; }
             if (v_bottom >= 0.0) { flux_bottom = v_bottom * scalar.ptr[south]; }
-            let advective: f64 = (flux_right - flux_left) * inv_dx + (flux_top - flux_bottom) * inv_dy;
-            let laplace: f64 = (scalar.ptr[east] - 2.0 * scalar.ptr[cell] + scalar.ptr[west]) * inv_dx2 +
-                               (scalar.ptr[north] - 2.0 * scalar.ptr[cell] + scalar.ptr[south]) * inv_dy2;
-            output_ptr[cell] = scalar.ptr[cell] - dt * advective + dt * diffusivity * laplace;
+            let advective: f64 = (flux_right - flux_left) * inv_dx +
+                (flux_top - flux_bottom) * inv_dy;
+            let laplace: f64 =
+                (scalar.ptr[east] - 2.0 * scalar.ptr[cell] + scalar.ptr[west]) *
+                inv_dx2 +
+                (scalar.ptr[north] - 2.0 * scalar.ptr[cell] + scalar.ptr[south]) *
+                inv_dy2;
+            output_ptr[cell] = scalar.ptr[cell] - dt * advective + dt *
+                diffusivity * laplace;
         }
     }
+
     validate_finite_result(output)?;
     return Ok(cells);
 }
 
 // Heun RK2 for the periodic conservative flux operator.
 pub fn transport_scalar_periodic_rk2_2d(
-    nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, diffusivity: f64,
-    u: Span<f64>, v: Span<f64>, scalar: Span<f64>, stage: Span<f64>, output: Span<f64>
+    nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, diffusivity: f64, u: Span<f64>,
+    v: Span<f64>, scalar: Span<f64>, stage: Span<f64>, output: Span<f64>
 ) -> Result<u64, FluidError> {
-    if (stage.len != scalar.len || output.len != scalar.len) { return Err(DimensionMismatch); }
-    transport_scalar_periodic_2d(nx, ny, dx, dy, dt, diffusivity, u, v, scalar, stage)?;
-    transport_scalar_periodic_2d(nx, ny, dx, dy, dt, diffusivity, u, v, stage, output)?;
+    if (stage.len != scalar.len || output.len != scalar.len) {
+        return Err(DimensionMismatch);
+    }
+
+    transport_scalar_periodic_2d(
+            nx, ny, dx, dy, dt, diffusivity, u, v, scalar, stage)?;
+    transport_scalar_periodic_2d(
+            nx, ny, dx, dy, dt, diffusivity, u, v, stage, output)?;
     let mut output_ptr: *f64 = output.ptr;
-    parfor (i in 0..scalar.len) { output_ptr[i] = 0.5 * (scalar.ptr[i] + output_ptr[i]); }
+
+    parfor (i in 0..scalar.len) {
+        output_ptr[i] = 0.5 * (scalar.ptr[i] + output_ptr[i]);
+    }
+
     validate_finite_result(output)?;
     return Ok(scalar.len);
 }
 
 // Heun RK2: q* = q + dt L(q); q(n+1)=0.5*(q+q*+dt L(q*)).
 pub fn transport_scalar_rk2_2d(
-    nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, viscosity: f64,
-    u: Span<f64>, v: Span<f64>, scalar: Span<f64>, stage: Span<f64>, output: Span<f64>
+    nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, viscosity: f64, u: Span<f64>,
+    v: Span<f64>, scalar: Span<f64>, stage: Span<f64>, output: Span<f64>
 ) -> Result<u64, FluidError> {
-    if (stage.len != scalar.len || output.len != scalar.len) { return Err(DimensionMismatch); }
-    transport_scalar_upwind_2d(nx, ny, dx, dy, dt, viscosity, u, v, scalar, stage)?;
+    if (stage.len != scalar.len || output.len != scalar.len) {
+        return Err(DimensionMismatch);
+    }
+
+    transport_scalar_upwind_2d(
+            nx, ny, dx, dy, dt, viscosity, u, v, scalar, stage)?;
     // The second Euler image is formed in output; the Heun average then uses
     // the original state and this second image, without allocating a field.
-    transport_scalar_upwind_2d(nx, ny, dx, dy, dt, viscosity, u, v, stage, output)?;
+    transport_scalar_upwind_2d(
+            nx, ny, dx, dy, dt, viscosity, u, v, stage, output)?;
     let mut output_ptr: *f64 = output.ptr;
-    parfor (i in 0..scalar.len) { output_ptr[i] = 0.5 * (scalar.ptr[i] + output_ptr[i]); }
+
+    parfor (i in 0..scalar.len) {
+        output_ptr[i] = 0.5 * (scalar.ptr[i] + output_ptr[i]);
+    }
+
     validate_finite_result(output)?;
     return Ok(scalar.len);
 }
 
 pub fn stable_timestep_2d(
-    nx: u64, ny: u64, dx: f64, dy: f64, viscosity: f64, cfl: f64,
-    u: Span<f64>, v: Span<f64>
+    nx: u64, ny: u64, dx: f64, dy: f64, viscosity: f64, cfl: f64, u: Span<f64>,
+    v: Span<f64>
 ) -> Result<f64, FluidError> {
-    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
-    if (!finite_f64(viscosity) || viscosity < 0.0) { return Err(InvalidViscosity); }
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) {
+        return Err(InvalidSpacing);
+    }
+
+    if (!finite_f64(viscosity) || viscosity < 0.0) {
+        return Err(InvalidViscosity);
+    }
+
     if (!finite_f64(cfl) || cfl <= 0.0 || cfl > 1.0) { return Err(InvalidCfl); }
     let cells: u64 = grid_cell_count_2d(nx, ny)?;
     if (u.len != cells || v.len != cells) { return Err(DimensionMismatch); }
-    validate_finite(u)?; validate_finite(v)?;
+    validate_finite(u)?;
+    validate_finite(v)?;
     // Serial deterministic maxima (see max_f64 in Freshet-Numerics for the
     // floating-point min/max parfor reduction backend note).
     let mut max_u: f64 = 0.0;
     let mut max_v: f64 = 0.0;
+
     for (i in 0..cells) {
-        let au: f64 = fabs(u.ptr[i]); let av: f64 = fabs(v.ptr[i]);
+        let au: f64 = fabs(u.ptr[i]);
+        let av: f64 = fabs(v.ptr[i]);
         if (au > max_u) { max_u = au; }
         if (av > max_v) { max_v = av; }
     }
-    let rate: f64 = max_u / dx + max_v / dy + 2.0 * viscosity * (1.0 / (dx * dx) + 1.0 / (dy * dy));
+
+    let rate: f64 = max_u / dx + max_v / dy + 2.0 * viscosity *
+        (1.0 / (dx * dx) + 1.0 / (dy * dy));
     if (!finite_f64(rate)) { return Err(NonFiniteResult); }
+
     if (rate > 0.0) {
         let timestep: f64 = cfl / rate;
-        if (!finite_f64(timestep) || timestep <= 0.0) { return Err(NonFiniteResult); }
+
+        if (!finite_f64(timestep) || timestep <= 0.0) {
+            return Err(NonFiniteResult);
+        }
+
         return Ok(timestep);
     }
+
     return Ok(1.0e300);
 }
 
@@ -434,21 +598,48 @@ pub fn mac_stable_timestep_2d(
     nx: u64, ny: u64, dx: f64, dy: f64, viscosity: f64, cfl: f64,
     u_faces: Span<f64>, v_faces: Span<f64>
 ) -> Result<f64, FluidError> {
-    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
-    if (!finite_f64(viscosity) || viscosity < 0.0) { return Err(InvalidViscosity); }
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) {
+        return Err(InvalidSpacing);
+    }
+
+    if (!finite_f64(viscosity) || viscosity < 0.0) {
+        return Err(InvalidViscosity);
+    }
+
     if (!finite_f64(cfl) || cfl <= 0.0 || cfl > 1.0) { return Err(InvalidCfl); }
-    if (u_faces.len != mac_u_face_count_2d(nx, ny)? || v_faces.len != mac_v_face_count_2d(nx, ny)?) { return Err(DimensionMismatch); }
-    validate_finite(u_faces)?; validate_finite(v_faces)?;
-    let mut max_u: f64 = 0.0; let mut max_v: f64 = 0.0;
-    for (i in 0..u_faces.len) { let absolute: f64 = fabs(u_faces.ptr[i]); if (absolute > max_u) { max_u = absolute; } }
-    for (i in 0..v_faces.len) { let absolute: f64 = fabs(v_faces.ptr[i]); if (absolute > max_v) { max_v = absolute; } }
-    let rate: f64 = max_u / dx + max_v / dy + 2.0 * viscosity * (1.0 / (dx * dx) + 1.0 / (dy * dy));
+
+    if (u_faces.len != mac_u_face_count_2d(nx, ny)? || v_faces.len !=
+        mac_v_face_count_2d(nx, ny)?) { return Err(DimensionMismatch); }
+
+    validate_finite(u_faces)?;
+    validate_finite(v_faces)?;
+    let mut max_u: f64 = 0.0;
+    let mut max_v: f64 = 0.0;
+
+    for (i in 0..u_faces.len) {
+        let absolute: f64 = fabs(u_faces.ptr[i]);
+        if (absolute > max_u) { max_u = absolute; }
+    }
+
+    for (i in 0..v_faces.len) {
+        let absolute: f64 = fabs(v_faces.ptr[i]);
+        if (absolute > max_v) { max_v = absolute; }
+    }
+
+    let rate: f64 = max_u / dx + max_v / dy + 2.0 * viscosity *
+        (1.0 / (dx * dx) + 1.0 / (dy * dy));
     if (!finite_f64(rate)) { return Err(NonFiniteResult); }
+
     if (rate > 0.0) {
         let timestep: f64 = cfl / rate;
-        if (!finite_f64(timestep) || timestep <= 0.0) { return Err(NonFiniteResult); }
+
+        if (!finite_f64(timestep) || timestep <= 0.0) {
+            return Err(NonFiniteResult);
+        }
+
         return Ok(timestep);
     }
+
     return Ok(1.0e300);
 }
 
@@ -457,15 +648,22 @@ pub fn mac_stable_timestep_2d(
 // Periodic identifies opposite normal faces. Wall values prescribe tangential
 // wall speed (e.g. top=1 for the lid-driven cavity).
 pub fn mac_apply_velocity_boundaries_2d(
-    nx: u64, ny: u64, boundaries: MACBoundaryConditions2D,
-    u_faces: Span<f64>, v_faces: Span<f64>
+    nx: u64, ny: u64, boundaries: MACBoundaryConditions2D, u_faces: Span<f64>,
+    v_faces: Span<f64>
 ) -> Result<u64, FluidError> {
     validate_boundaries(boundaries)?;
-    if (u_faces.len != mac_u_face_count_2d(nx, ny)? || v_faces.len != mac_v_face_count_2d(nx, ny)?) { return Err(DimensionMismatch); }
-    validate_finite(u_faces)?; validate_finite(v_faces)?;
-    let mut u_ptr: *f64 = u_faces.ptr; let mut v_ptr: *f64 = v_faces.ptr;
+
+    if (u_faces.len != mac_u_face_count_2d(nx, ny)? || v_faces.len !=
+        mac_v_face_count_2d(nx, ny)?) { return Err(DimensionMismatch); }
+
+    validate_finite(u_faces)?;
+    validate_finite(v_faces)?;
+    let mut u_ptr: *f64 = u_faces.ptr;
+    let mut v_ptr: *f64 = v_faces.ptr;
+
     for (row in 0..ny) {
         let base: u64 = row * (nx + 1);
+
         match (boundaries.left.kind) {
             Wall => { u_ptr[base] = 0.0; }
             Dirichlet => { u_ptr[base] = boundaries.left.normal_velocity; }
@@ -474,15 +672,19 @@ pub fn mac_apply_velocity_boundaries_2d(
             Outflow => { u_ptr[base] = u_ptr[base + 1]; }
             Periodic => { u_ptr[base + nx] = u_ptr[base]; }
         }
+
         match (boundaries.right.kind) {
             Wall => { u_ptr[base + nx] = 0.0; }
-            Dirichlet => { u_ptr[base + nx] = boundaries.right.normal_velocity; }
+            Dirichlet => {
+                u_ptr[base + nx] = boundaries.right.normal_velocity;
+            }
             Inflow => { u_ptr[base + nx] = boundaries.right.normal_velocity; }
             Neumann => { u_ptr[base + nx] = u_ptr[base + nx - 1]; }
             Outflow => { u_ptr[base + nx] = u_ptr[base + nx - 1]; }
             Periodic => { u_ptr[base + nx] = u_ptr[base]; }
         }
     }
+
     for (col in 0..nx) {
         match (boundaries.bottom.kind) {
             Wall => { v_ptr[col] = 0.0; }
@@ -492,28 +694,55 @@ pub fn mac_apply_velocity_boundaries_2d(
             Outflow => { v_ptr[col] = v_ptr[nx + col]; }
             Periodic => { v_ptr[ny * nx + col] = v_ptr[col]; }
         }
+
         match (boundaries.top.kind) {
             Wall => { v_ptr[ny * nx + col] = 0.0; }
-            Dirichlet => { v_ptr[ny * nx + col] = boundaries.top.normal_velocity; }
+            Dirichlet => {
+                v_ptr[ny * nx + col] = boundaries.top.normal_velocity;
+            }
+
             Inflow => { v_ptr[ny * nx + col] = boundaries.top.normal_velocity; }
             Neumann => { v_ptr[ny * nx + col] = v_ptr[(ny - 1) * nx + col]; }
             Outflow => { v_ptr[ny * nx + col] = v_ptr[(ny - 1) * nx + col]; }
             Periodic => { v_ptr[ny * nx + col] = v_ptr[col]; }
         }
     }
+
     // Tangential no-slip / moving-wall values on the nearest MAC rows/columns.
-    if (prescribes_tangential_velocity(boundaries.bottom.kind)) { for (i in 1..nx) { u_ptr[i] = boundaries.bottom.tangential_velocity; } }
-    if (prescribes_tangential_velocity(boundaries.top.kind)) { for (i in 1..nx) { u_ptr[(ny - 1) * (nx + 1) + i] = boundaries.top.tangential_velocity; } }
-    if (prescribes_tangential_velocity(boundaries.left.kind)) { for (j in 1..ny) { v_ptr[j * nx] = boundaries.left.tangential_velocity; } }
-    if (prescribes_tangential_velocity(boundaries.right.kind)) { for (j in 1..ny) { v_ptr[j * nx + nx - 1] = boundaries.right.tangential_velocity; } }
-    validate_finite_result(u_faces)?; validate_finite_result(v_faces)?;
+    if (prescribes_tangential_velocity(boundaries.bottom.kind)) {
+        for (i in 1..nx) { u_ptr[i] = boundaries.bottom.tangential_velocity; }
+    }
+
+    if (prescribes_tangential_velocity(boundaries.top.kind)) {
+        for (i in 1..nx) {
+            u_ptr[(ny - 1) * (nx + 1) + i] = boundaries.top.tangential_velocity;
+        }
+    }
+
+    if (prescribes_tangential_velocity(boundaries.left.kind)) {
+        for (j in 1..ny) {
+            v_ptr[j * nx] = boundaries.left.tangential_velocity;
+        }
+    }
+
+    if (prescribes_tangential_velocity(boundaries.right.kind)) {
+        for (j in 1..ny) {
+            v_ptr[j * nx + nx - 1] = boundaries.right.tangential_velocity;
+        }
+    }
+
+    validate_finite_result(u_faces)?;
+    validate_finite_result(v_faces)?;
     return Ok(1);
 }
 
 // Keep boundary-term calculations as pure scalar helpers. Penstock's pure
 // checker does not accept a struct-literal constructor in a pure function.
-@pure fn pressure_face_neighbour_sum(boundary: BoundaryCondition2D, wrapped_neighbour: f64, inverse_h2: f64) -> f64 {
+@pure fn pressure_face_neighbour_sum(
+    boundary: BoundaryCondition2D, wrapped_neighbour: f64, inverse_h2: f64
+) -> f64 {
     let mut value: f64 = 0.0;
+
     match (boundary.kind) {
         Dirichlet => { value = 2.0 * boundary.pressure_value * inverse_h2; }
         Outflow => { value = 2.0 * boundary.pressure_value * inverse_h2; }
@@ -522,11 +751,15 @@ pub fn mac_apply_velocity_boundaries_2d(
         Wall => { value = 0.0; }
         Inflow => { value = 0.0; }
     }
+
     return value;
 }
 
-@pure fn pressure_face_diagonal(boundary: BoundaryCondition2D, inverse_h2: f64) -> f64 {
+@pure fn pressure_face_diagonal(
+    boundary: BoundaryCondition2D, inverse_h2: f64
+) -> f64 {
     let mut value: f64 = 0.0;
+
     match (boundary.kind) {
         Dirichlet => { value = 2.0 * inverse_h2; }
         Outflow => { value = 2.0 * inverse_h2; }
@@ -535,11 +768,15 @@ pub fn mac_apply_velocity_boundaries_2d(
         Wall => { value = 0.0; }
         Inflow => { value = 0.0; }
     }
+
     return value;
 }
 
-@pure fn pressure_face_source(boundary: BoundaryCondition2D, spacing: f64) -> f64 {
+@pure fn pressure_face_source(
+    boundary: BoundaryCondition2D, spacing: f64
+) -> f64 {
     let mut value: f64 = 0.0;
+
     match (boundary.kind) {
         Dirichlet => { value = 0.0; }
         Outflow => { value = 0.0; }
@@ -548,19 +785,58 @@ pub fn mac_apply_velocity_boundaries_2d(
         Wall => { value = 0.0; }
         Inflow => { value = boundary.pressure_gradient / spacing; }
     }
+
     return value;
 }
 
-fn boundary_pressure_gradient(boundary: BoundaryCondition2D, cell_pressure: f64, opposite_pressure: f64, spacing: f64, is_low_side: bool) -> f64 {
+fn boundary_pressure_gradient(
+    boundary: BoundaryCondition2D, cell_pressure: f64, opposite_pressure: f64,
+    spacing: f64, is_low_side: bool
+) -> f64 {
     let mut gradient: f64 = 0.0;
+
     match (boundary.kind) {
-        Dirichlet => { if (is_low_side) { gradient = 2.0 * (cell_pressure - boundary.pressure_value) / spacing; } else { gradient = 2.0 * (boundary.pressure_value - cell_pressure) / spacing; } }
-        Outflow => { if (is_low_side) { gradient = 2.0 * (cell_pressure - boundary.pressure_value) / spacing; } else { gradient = 2.0 * (boundary.pressure_value - cell_pressure) / spacing; } }
-        Periodic => { if (is_low_side) { gradient = (cell_pressure - opposite_pressure) / spacing; } else { gradient = (opposite_pressure - cell_pressure) / spacing; } }
-        Neumann => { if (is_low_side) { gradient = 0.0 - boundary.pressure_gradient; } else { gradient = boundary.pressure_gradient; } }
+        Dirichlet => {
+            if (is_low_side) {
+                gradient = 2.0 * (cell_pressure - boundary.pressure_value) /
+                    spacing;
+            } else {
+                gradient = 2.0 * (boundary.pressure_value - cell_pressure) /
+                    spacing;
+            }
+        }
+
+        Outflow => {
+            if (is_low_side) {
+                gradient = 2.0 * (cell_pressure - boundary.pressure_value) /
+                    spacing;
+            } else {
+                gradient = 2.0 * (boundary.pressure_value - cell_pressure) /
+                    spacing;
+            }
+        }
+
+        Periodic => {
+            if (is_low_side) {
+                gradient = (cell_pressure - opposite_pressure) / spacing;
+            } else { gradient = (opposite_pressure - cell_pressure) / spacing; }
+        }
+
+        Neumann => {
+            if (is_low_side) { gradient = 0.0 - boundary.pressure_gradient; } else {
+                gradient = boundary.pressure_gradient;
+            }
+        }
+
         Wall => { gradient = 0.0; }
-        Inflow => { if (is_low_side) { gradient = 0.0 - boundary.pressure_gradient; } else { gradient = boundary.pressure_gradient; } }
+
+        Inflow => {
+            if (is_low_side) { gradient = 0.0 - boundary.pressure_gradient; } else {
+                gradient = boundary.pressure_gradient;
+            }
+        }
     }
+
     return gradient;
 }
 
@@ -569,31 +845,44 @@ fn max_abs(values: Span<f64>) -> Result<f64, FluidError> {
     // Serial deterministic maximum: floating-point min/max parfor reductions
     // currently lower to LLVM intrinsics LLVM 20-23 do not provide.
     let mut maximum: f64 = 0.0;
+
     for (i in 0..values.len) {
         let absolute: f64 = fabs(values.ptr[i]);
         if (absolute > maximum) { maximum = absolute; }
     }
+
     return Ok(maximum);
 }
 
 pub fn mac_divergence_2d(
-    nx: u64, ny: u64, dx: f64, dy: f64,
-    u_faces: Span<f64>, v_faces: Span<f64>, divergence: Span<f64>
+    nx: u64, ny: u64, dx: f64, dy: f64, u_faces: Span<f64>, v_faces: Span<f64>,
+    divergence: Span<f64>
 ) -> Result<u64, FluidError> {
-    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) {
+        return Err(InvalidSpacing);
+    }
+
     let cells: u64 = grid_cell_count_2d(nx, ny)?;
-    if (u_faces.len != mac_u_face_count_2d(nx, ny)? || v_faces.len != mac_v_face_count_2d(nx, ny)? || divergence.len != cells) { return Err(DimensionMismatch); }
-    validate_finite(u_faces)?; validate_finite(v_faces)?;
+
+    if (u_faces.len != mac_u_face_count_2d(nx, ny)? || v_faces.len !=
+        mac_v_face_count_2d(nx, ny)? || divergence.len != cells) {
+        return Err(DimensionMismatch);
+    }
+
+    validate_finite(u_faces)?;
+    validate_finite(v_faces)?;
     let mut out_ptr: *f64 = divergence.ptr;
+
     parfor (row in 0..ny) {
         for (col in 0..nx) {
             let cell: u64 = row * nx + col;
             let left: u64 = row * (nx + 1) + col;
             let bottom: u64 = row * nx + col;
             out_ptr[cell] = (u_faces.ptr[left + 1] - u_faces.ptr[left]) / dx +
-                            (v_faces.ptr[bottom + nx] - v_faces.ptr[bottom]) / dy;
+                (v_faces.ptr[bottom + nx] - v_faces.ptr[bottom]) / dy;
         }
     }
+
     validate_finite_result(divergence)?;
     return Ok(cells);
 }
@@ -603,30 +892,51 @@ pub fn mac_divergence_2d(
 pub fn mac_laplacian_periodic_2d(
     nx: u64, ny: u64, dx: f64, dy: f64, pressure: Span<f64>, output: Span<f64>
 ) -> Result<u64, FluidError> {
-    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) {
+        return Err(InvalidSpacing);
+    }
+
     let cells: u64 = grid_cell_count_2d(nx, ny)?;
-    if (pressure.len != cells || output.len != cells) { return Err(DimensionMismatch); }
+
+    if (pressure.len != cells || output.len != cells) {
+        return Err(DimensionMismatch);
+    }
+
     validate_finite(pressure)?;
-    let inv_dx: f64 = 1.0 / dx; let inv_dy: f64 = 1.0 / dy;
-    if (!finite_f64(inv_dx) || !finite_f64(inv_dy)) { return Err(NonFiniteResult); }
-    let ix: f64 = inv_dx * inv_dx; let iy: f64 = inv_dy * inv_dy;
+    let inv_dx: f64 = 1.0 / dx;
+    let inv_dy: f64 = 1.0 / dy;
+
+    if (!finite_f64(inv_dx) || !finite_f64(inv_dy)) {
+        return Err(NonFiniteResult);
+    }
+
+    let ix: f64 = inv_dx * inv_dx;
+    let iy: f64 = inv_dy * inv_dy;
     if (!finite_f64(ix) || !finite_f64(iy)) { return Err(NonFiniteResult); }
     let mut out_ptr: *f64 = output.ptr;
+
     parfor (row in 0..ny) {
         let mut south: u64 = row * nx;
         let mut north: u64 = row * nx;
-        if (row == 0) { south = (ny - 1) * nx; } else { south = (row - 1) * nx; }
+        if (row == 0) { south = (ny - 1) * nx; } else {
+            south = (row - 1) * nx;
+        }
         if (row + 1 == ny) { north = 0; } else { north = (row + 1) * nx; }
+
         for (col in 0..nx) {
             let mut west: u64 = col;
             let mut east: u64 = col;
             if (col == 0) { west = nx - 1; } else { west = col - 1; }
             if (col + 1 == nx) { east = 0; } else { east = col + 1; }
             let cell: u64 = row * nx + col;
-            out_ptr[cell] = (pressure.ptr[row * nx + east] - 2.0 * pressure.ptr[cell] + pressure.ptr[row * nx + west]) * ix +
-                            (pressure.ptr[north + col] - 2.0 * pressure.ptr[cell] + pressure.ptr[south + col]) * iy;
+            out_ptr[cell] =
+                (pressure.ptr[row * nx + east] - 2.0 * pressure.ptr[cell] +
+                pressure.ptr[row * nx + west]) * ix +
+                (pressure.ptr[north + col] - 2.0 * pressure.ptr[cell] +
+                pressure.ptr[south + col]) * iy;
         }
     }
+
     validate_finite_result(output)?;
     return Ok(cells);
 }
@@ -634,33 +944,48 @@ pub fn mac_laplacian_periodic_2d(
 // Gradient on MAC faces with periodic wrap. Its divergence is exactly
 // mac_laplacian_periodic_2d (up to floating-point round-off).
 pub fn mac_gradient_periodic_2d(
-    nx: u64, ny: u64, dx: f64, dy: f64, pressure: Span<f64>,
-    u_faces: Span<f64>, v_faces: Span<f64>
+    nx: u64, ny: u64, dx: f64, dy: f64, pressure: Span<f64>, u_faces: Span<f64>,
+    v_faces: Span<f64>
 ) -> Result<u64, FluidError> {
-    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) {
+        return Err(InvalidSpacing);
+    }
+
     let cells: u64 = grid_cell_count_2d(nx, ny)?;
-    if (pressure.len != cells || u_faces.len != mac_u_face_count_2d(nx, ny)? || v_faces.len != mac_v_face_count_2d(nx, ny)?) { return Err(DimensionMismatch); }
+
+    if (pressure.len != cells || u_faces.len != mac_u_face_count_2d(nx, ny)? ||
+        v_faces.len != mac_v_face_count_2d(nx, ny)?) {
+        return Err(DimensionMismatch);
+    }
+
     validate_finite(pressure)?;
-    let mut u_ptr: *f64 = u_faces.ptr; let mut v_ptr: *f64 = v_faces.ptr;
+    let mut u_ptr: *f64 = u_faces.ptr;
+    let mut v_ptr: *f64 = v_faces.ptr;
+
     parfor (row in 0..ny) {
         for (face in 1..nx) {
             let left: u64 = row * nx + face - 1;
             let right: u64 = row * nx + face;
-            u_ptr[row * (nx + 1) + face] = (pressure.ptr[right] - pressure.ptr[left]) / dx;
+            u_ptr[row * (nx + 1) + face] =
+                (pressure.ptr[right] - pressure.ptr[left]) / dx;
         }
+
         let low: u64 = row * nx;
         let high: u64 = row * nx + nx - 1;
         let gradient: f64 = (pressure.ptr[low] - pressure.ptr[high]) / dx;
         u_ptr[row * (nx + 1)] = gradient;
         u_ptr[row * (nx + 1) + nx] = gradient;
     }
+
     parfor (face in 1..ny) {
         for (col in 0..nx) {
             let lower: u64 = (face - 1) * nx + col;
             let upper: u64 = face * nx + col;
-            v_ptr[face * nx + col] = (pressure.ptr[upper] - pressure.ptr[lower]) / dy;
+            v_ptr[face * nx + col] =
+                (pressure.ptr[upper] - pressure.ptr[lower]) / dy;
         }
     }
+
     for (col in 0..nx) {
         let low: u64 = col;
         let high: u64 = (ny - 1) * nx + col;
@@ -668,7 +993,9 @@ pub fn mac_gradient_periodic_2d(
         v_ptr[col] = gradient;
         v_ptr[ny * nx + col] = gradient;
     }
-    validate_finite_result(u_faces)?; validate_finite_result(v_faces)?;
+
+    validate_finite_result(u_faces)?;
+    validate_finite_result(v_faces)?;
     return Ok(cells);
 }
 
@@ -678,45 +1005,100 @@ pub fn mac_gradient_periodic_2d(
 // Dirichlet/Outflow use the supplied pressure value; Periodic wraps neighbours.
 pub fn project_incompressible_mac_2d(
     nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, density: f64,
-    boundaries: MACBoundaryConditions2D,
-    u_faces: Span<f64>, v_faces: Span<f64>, pressure: Span<f64>, pressure_scratch: Span<f64>,
-    divergence: Span<f64>, max_iterations: u64, tolerance: f64
+    boundaries: MACBoundaryConditions2D, u_faces: Span<f64>, v_faces: Span<f64>,
+    pressure: Span<f64>, pressure_scratch: Span<f64>, divergence: Span<f64>,
+    max_iterations: u64, tolerance: f64
 ) -> Result<ProjectionReport, FluidError> {
-    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) {
+        return Err(InvalidSpacing);
+    }
+
     if (!finite_f64(dt) || dt <= 0.0) { return Err(InvalidTimestep); }
     if (!finite_f64(density) || density <= 0.0) { return Err(InvalidDensity); }
-    if (!finite_f64(tolerance) || tolerance < 0.0) { return Err(InvalidTolerance); }
+
+    if (!finite_f64(tolerance) || tolerance < 0.0) {
+        return Err(InvalidTolerance);
+    }
+
     validate_boundaries(boundaries)?;
     let cells: u64 = grid_cell_count_2d(nx, ny)?;
-    if (u_faces.len != mac_u_face_count_2d(nx, ny)? || v_faces.len != mac_v_face_count_2d(nx, ny)? ||
-        pressure.len != cells || pressure_scratch.len != cells || divergence.len != cells) { return Err(DimensionMismatch); }
-    validate_finite(u_faces)?; validate_finite(v_faces)?;
+
+    if (u_faces.len != mac_u_face_count_2d(nx, ny)? || v_faces.len !=
+        mac_v_face_count_2d(nx, ny)? || pressure.len != cells ||
+        pressure_scratch.len != cells || divergence.len != cells) {
+        return Err(DimensionMismatch);
+    }
+
+    validate_finite(u_faces)?;
+    validate_finite(v_faces)?;
     mac_apply_velocity_boundaries_2d(nx, ny, boundaries, u_faces, v_faces)?;
     mac_divergence_2d(nx, ny, dx, dy, u_faces, v_faces, divergence)?;
     let initial_divergence: f64 = max_abs(divergence)?;
-    let inv_dx: f64 = 1.0 / dx; let inv_dy: f64 = 1.0 / dy;
-    if (!finite_f64(inv_dx) || !finite_f64(inv_dy)) { return Err(NonFiniteResult); }
-    let inv_dx2: f64 = inv_dx * inv_dx; let inv_dy2: f64 = inv_dy * inv_dy;
+    let inv_dx: f64 = 1.0 / dx;
+    let inv_dy: f64 = 1.0 / dy;
+
+    if (!finite_f64(inv_dx) || !finite_f64(inv_dy)) {
+        return Err(NonFiniteResult);
+    }
+
+    let inv_dx2: f64 = inv_dx * inv_dx;
+    let inv_dy2: f64 = inv_dy * inv_dy;
     let rhs_scale: f64 = density / dt;
     let correction_scale: f64 = dt / density;
-    if (!finite_f64(inv_dx2) || !finite_f64(inv_dy2) || !finite_f64(rhs_scale) || !finite_f64(correction_scale)) { return Err(NonFiniteResult); }
-    let has_pressure_reference: bool = is_pressure_dirichlet(boundaries.left.kind) ||
-        is_pressure_dirichlet(boundaries.right.kind) || is_pressure_dirichlet(boundaries.bottom.kind) ||
+
+    if (!finite_f64(inv_dx2) || !finite_f64(inv_dy2) || !finite_f64(rhs_scale) ||
+        !finite_f64(correction_scale)) { return Err(NonFiniteResult); }
+
+    let has_pressure_reference: bool =
+        is_pressure_dirichlet(boundaries.left.kind) ||
+        is_pressure_dirichlet(boundaries.right.kind) ||
+        is_pressure_dirichlet(boundaries.bottom.kind) ||
         is_pressure_dirichlet(boundaries.top.kind);
+
     if (!has_pressure_reference) {
         let mut net_rhs: f64 = 0.0;
-        @reproducible parfor (i in 0..cells) [reduction(+:net_rhs)] { net_rhs = net_rhs + divergence.ptr[i]; }
+
+        @reproducible parfor (i in 0..cells)[reduction(+: net_rhs)] {
+            net_rhs = net_rhs + divergence.ptr[i];
+        }
+
         let mut boundary_source: f64 = 0.0;
-        if (is_neumann(boundaries.left.kind)) { boundary_source = boundary_source + boundaries.left.pressure_gradient * (ny as f64) / dx; }
-        if (is_neumann(boundaries.right.kind)) { boundary_source = boundary_source + boundaries.right.pressure_gradient * (ny as f64) / dx; }
-        if (is_neumann(boundaries.bottom.kind)) { boundary_source = boundary_source + boundaries.bottom.pressure_gradient * (nx as f64) / dy; }
-        if (is_neumann(boundaries.top.kind)) { boundary_source = boundary_source + boundaries.top.pressure_gradient * (nx as f64) / dy; }
+
+        if (is_neumann(boundaries.left.kind)) {
+            boundary_source = boundary_source +
+                boundaries.left.pressure_gradient * (ny as f64) / dx;
+        }
+
+        if (is_neumann(boundaries.right.kind)) {
+            boundary_source = boundary_source +
+                boundaries.right.pressure_gradient * (ny as f64) / dx;
+        }
+
+        if (is_neumann(boundaries.bottom.kind)) {
+            boundary_source = boundary_source +
+                boundaries.bottom.pressure_gradient * (nx as f64) / dy;
+        }
+
+        if (is_neumann(boundaries.top.kind)) {
+            boundary_source = boundary_source + boundaries.top.pressure_gradient *
+                (nx as f64) / dy;
+        }
+
         let scaled_flux: f64 = rhs_scale * net_rhs;
-        if (!finite_f64(scaled_flux) || !finite_f64(boundary_source)) { return Err(NonFiniteResult); }
+
+        if (!finite_f64(scaled_flux) || !finite_f64(boundary_source)) {
+            return Err(NonFiniteResult);
+        }
+
         let mismatch: f64 = fabs(scaled_flux - boundary_source);
         if (!finite_f64(mismatch)) { return Err(NonFiniteResult); }
-        if (mismatch > 1.0e-10 * (1.0 + fabs(scaled_flux) + fabs(boundary_source))) { return Err(IncompatibleBoundaryFlux); }
+
+        if (mismatch > 1.0e-10 *
+            (1.0 + fabs(scaled_flux) + fabs(boundary_source))) {
+            return Err(IncompatibleBoundaryFlux);
+        }
     }
+
     let mut pressure_ptr: *f64 = pressure.ptr;
     let mut scratch_ptr: *f64 = pressure_scratch.ptr;
     for (i in 0..cells) { pressure_ptr[i] = 0.0; scratch_ptr[i] = 0.0; }
@@ -743,71 +1125,138 @@ pub fn project_incompressible_mac_2d(
                 let mut neighbour_sum: f64 = 0.0;
                 let mut diagonal: f64 = 0.0;
                 let mut source: f64 = 0.0;
-                if (col > 0) { neighbour_sum = neighbour_sum + pressure_ptr[cell - 1] * inv_dx2; diagonal = diagonal + inv_dx2; }
-                else {
-                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.left, pressure_ptr[row * nx + nx - 1], inv_dx2);
-                    diagonal = diagonal + pressure_face_diagonal(boundaries.left, inv_dx2);
-                    source = source + pressure_face_source(boundaries.left, dx);
+
+                if (col > 0) {
+                    neighbour_sum = neighbour_sum + pressure_ptr[cell - 1] *
+                        inv_dx2;
+                    diagonal = diagonal + inv_dx2;
+                } else {
+                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(
+                            boundaries.left, pressure_ptr[row * nx + nx - 1],
+                            inv_dx2);
+                    diagonal = diagonal + pressure_face_diagonal(
+                            boundaries.left, inv_dx2);
+                    source = source + pressure_face_source(
+                            boundaries.left, dx);
                 }
-                if (col + 1 < nx) { neighbour_sum = neighbour_sum + pressure_ptr[cell + 1] * inv_dx2; diagonal = diagonal + inv_dx2; }
-                else {
-                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.right, pressure_ptr[row * nx], inv_dx2);
-                    diagonal = diagonal + pressure_face_diagonal(boundaries.right, inv_dx2);
-                    source = source + pressure_face_source(boundaries.right, dx);
+
+                if (col + 1 < nx) {
+                    neighbour_sum = neighbour_sum + pressure_ptr[cell + 1] *
+                        inv_dx2;
+                    diagonal = diagonal + inv_dx2;
+                } else {
+                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(
+                            boundaries.right, pressure_ptr[row * nx], inv_dx2);
+                    diagonal = diagonal + pressure_face_diagonal(
+                            boundaries.right, inv_dx2);
+                    source = source + pressure_face_source(
+                            boundaries.right, dx);
                 }
-                if (row > 0) { neighbour_sum = neighbour_sum + pressure_ptr[cell - nx] * inv_dy2; diagonal = diagonal + inv_dy2; }
-                else {
-                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.bottom, pressure_ptr[(ny - 1) * nx + col], inv_dy2);
-                    diagonal = diagonal + pressure_face_diagonal(boundaries.bottom, inv_dy2);
-                    source = source + pressure_face_source(boundaries.bottom, dy);
+
+                if (row > 0) {
+                    neighbour_sum = neighbour_sum + pressure_ptr[cell - nx] *
+                        inv_dy2;
+                    diagonal = diagonal + inv_dy2;
+                } else {
+                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(
+                            boundaries.bottom,
+                            pressure_ptr[(ny - 1) * nx + col], inv_dy2);
+                    diagonal = diagonal + pressure_face_diagonal(
+                            boundaries.bottom, inv_dy2);
+                    source = source + pressure_face_source(
+                            boundaries.bottom, dy);
                 }
-                if (row + 1 < ny) { neighbour_sum = neighbour_sum + pressure_ptr[cell + nx] * inv_dy2; diagonal = diagonal + inv_dy2; }
-                else {
-                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.top, pressure_ptr[col], inv_dy2);
-                    diagonal = diagonal + pressure_face_diagonal(boundaries.top, inv_dy2);
+
+                if (row + 1 < ny) {
+                    neighbour_sum = neighbour_sum + pressure_ptr[cell + nx] *
+                        inv_dy2;
+                    diagonal = diagonal + inv_dy2;
+                } else {
+                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(
+                            boundaries.top, pressure_ptr[col], inv_dy2);
+                    diagonal = diagonal + pressure_face_diagonal(
+                            boundaries.top, inv_dy2);
                     source = source + pressure_face_source(boundaries.top, dy);
                 }
+
                 let rhs: f64 = rhs_scale * divergence.ptr[cell];
-                let jacobi_target: f64 = (neighbour_sum + source - rhs) / diagonal;
-                scratch_ptr[cell] = relaxation * jacobi_target + (1.0 - relaxation) * pressure_ptr[cell];
+                let jacobi_target: f64 = (neighbour_sum + source - rhs) /
+                    diagonal;
+                scratch_ptr[cell] = relaxation * jacobi_target +
+                    (1.0 - relaxation) * pressure_ptr[cell];
             }
         }
+
         let mut residual_max: f64 = 0.0;
+
         for (row in 0..ny) {
             for (col in 0..nx) {
                 let cell: u64 = row * nx + col;
                 let mut neighbour_sum: f64 = 0.0;
                 let mut diagonal: f64 = 0.0;
                 let mut source: f64 = 0.0;
-                if (col > 0) { neighbour_sum = neighbour_sum + scratch_ptr[cell - 1] * inv_dx2; diagonal = diagonal + inv_dx2; }
-                else {
-                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.left, scratch_ptr[row * nx + nx - 1], inv_dx2);
-                    diagonal = diagonal + pressure_face_diagonal(boundaries.left, inv_dx2);
-                    source = source + pressure_face_source(boundaries.left, dx);
+
+                if (col > 0) {
+                    neighbour_sum = neighbour_sum + scratch_ptr[cell - 1] *
+                        inv_dx2;
+                    diagonal = diagonal + inv_dx2;
+                } else {
+                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(
+                            boundaries.left, scratch_ptr[row * nx + nx - 1],
+                            inv_dx2);
+                    diagonal = diagonal + pressure_face_diagonal(
+                            boundaries.left, inv_dx2);
+                    source = source + pressure_face_source(
+                            boundaries.left, dx);
                 }
-                if (col + 1 < nx) { neighbour_sum = neighbour_sum + scratch_ptr[cell + 1] * inv_dx2; diagonal = diagonal + inv_dx2; }
-                else {
-                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.right, scratch_ptr[row * nx], inv_dx2);
-                    diagonal = diagonal + pressure_face_diagonal(boundaries.right, inv_dx2);
-                    source = source + pressure_face_source(boundaries.right, dx);
+
+                if (col + 1 < nx) {
+                    neighbour_sum = neighbour_sum + scratch_ptr[cell + 1] *
+                        inv_dx2;
+                    diagonal = diagonal + inv_dx2;
+                } else {
+                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(
+                            boundaries.right, scratch_ptr[row * nx], inv_dx2);
+                    diagonal = diagonal + pressure_face_diagonal(
+                            boundaries.right, inv_dx2);
+                    source = source + pressure_face_source(
+                            boundaries.right, dx);
                 }
-                if (row > 0) { neighbour_sum = neighbour_sum + scratch_ptr[cell - nx] * inv_dy2; diagonal = diagonal + inv_dy2; }
-                else {
-                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.bottom, scratch_ptr[(ny - 1) * nx + col], inv_dy2);
-                    diagonal = diagonal + pressure_face_diagonal(boundaries.bottom, inv_dy2);
-                    source = source + pressure_face_source(boundaries.bottom, dy);
+
+                if (row > 0) {
+                    neighbour_sum = neighbour_sum + scratch_ptr[cell - nx] *
+                        inv_dy2;
+                    diagonal = diagonal + inv_dy2;
+                } else {
+                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(
+                            boundaries.bottom, scratch_ptr[(ny - 1) * nx + col],
+                            inv_dy2);
+                    diagonal = diagonal + pressure_face_diagonal(
+                            boundaries.bottom, inv_dy2);
+                    source = source + pressure_face_source(
+                            boundaries.bottom, dy);
                 }
-                if (row + 1 < ny) { neighbour_sum = neighbour_sum + scratch_ptr[cell + nx] * inv_dy2; diagonal = diagonal + inv_dy2; }
-                else {
-                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.top, scratch_ptr[col], inv_dy2);
-                    diagonal = diagonal + pressure_face_diagonal(boundaries.top, inv_dy2);
+
+                if (row + 1 < ny) {
+                    neighbour_sum = neighbour_sum + scratch_ptr[cell + nx] *
+                        inv_dy2;
+                    diagonal = diagonal + inv_dy2;
+                } else {
+                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(
+                            boundaries.top, scratch_ptr[col], inv_dy2);
+                    diagonal = diagonal + pressure_face_diagonal(
+                            boundaries.top, inv_dy2);
                     source = source + pressure_face_source(boundaries.top, dy);
                 }
-                let applied: f64 = neighbour_sum - diagonal * scratch_ptr[cell] + source;
-                let error: f64 = fabs(applied - rhs_scale * divergence.ptr[cell]);
+
+                let applied: f64 = neighbour_sum - diagonal * scratch_ptr[cell] +
+                    source;
+                let error: f64 =
+                    fabs(applied - rhs_scale * divergence.ptr[cell]);
                 if (error > residual_max) { residual_max = error; }
             }
         }
+
         if (!finite_f64(residual_max)) { return Err(NonFiniteResult); }
         validate_finite_result(pressure_scratch)?;
         parfor (i in 0..cells) { pressure_ptr[i] = scratch_ptr[i]; }
@@ -819,48 +1268,74 @@ pub fn project_incompressible_mac_2d(
 
     // Correct internal face velocities with the same pressure differences
     // used by the pressure operator; this enforces D(u - dt/rho Gp)=0.
-    let mut u_ptr: *f64 = u_faces.ptr; let mut v_ptr: *f64 = v_faces.ptr;
+    let mut u_ptr: *f64 = u_faces.ptr;
+    let mut v_ptr: *f64 = v_faces.ptr;
+
     parfor (row in 0..ny) {
         for (face in 1..nx) {
             let left_cell: u64 = row * nx + face - 1;
             let right_cell: u64 = row * nx + face;
             let index: u64 = row * (nx + 1) + face;
-            u_ptr[index] = u_ptr[index] - correction_scale * (pressure_ptr[right_cell] - pressure_ptr[left_cell]) / dx;
+            u_ptr[index] = u_ptr[index] - correction_scale *
+                (pressure_ptr[right_cell] - pressure_ptr[left_cell]) / dx;
         }
     }
+
     parfor (face in 1..ny) {
         for (col in 0..nx) {
             let lower_cell: u64 = (face - 1) * nx + col;
             let upper_cell: u64 = face * nx + col;
-            v_ptr[face * nx + col] = v_ptr[face * nx + col] - correction_scale * (pressure_ptr[upper_cell] - pressure_ptr[lower_cell]) / dy;
+            v_ptr[face * nx + col] = v_ptr[face * nx + col] - correction_scale *
+                (pressure_ptr[upper_cell] - pressure_ptr[lower_cell]) / dy;
         }
     }
+
     // Boundary pressure gradients for Dirichlet/outflow and periodic faces.
     for (row in 0..ny) {
         let low_cell: u64 = row * nx;
         let high_cell: u64 = row * nx + nx - 1;
-        let low_grad: f64 = boundary_pressure_gradient(boundaries.left, pressure_ptr[low_cell], pressure_ptr[high_cell], dx, true);
-        let high_grad: f64 = boundary_pressure_gradient(boundaries.right, pressure_ptr[high_cell], pressure_ptr[low_cell], dx, false);
-        u_ptr[row * (nx + 1)] = u_ptr[row * (nx + 1)] - correction_scale * low_grad;
-        u_ptr[row * (nx + 1) + nx] = u_ptr[row * (nx + 1) + nx] - correction_scale * high_grad;
-        if (is_periodic(boundaries.left.kind)) { u_ptr[row * (nx + 1) + nx] = u_ptr[row * (nx + 1)]; }
+        let low_grad: f64 = boundary_pressure_gradient(
+                boundaries.left, pressure_ptr[low_cell],
+                pressure_ptr[high_cell], dx, true);
+        let high_grad: f64 = boundary_pressure_gradient(
+                boundaries.right, pressure_ptr[high_cell],
+                pressure_ptr[low_cell], dx, false);
+        u_ptr[row * (nx + 1)] = u_ptr[row * (nx + 1)] - correction_scale *
+            low_grad;
+        u_ptr[row * (nx + 1) + nx] = u_ptr[row * (nx + 1) + nx] -
+            correction_scale * high_grad;
+
+        if (is_periodic(boundaries.left.kind)) {
+            u_ptr[row * (nx + 1) + nx] = u_ptr[row * (nx + 1)];
+        }
     }
+
     for (col in 0..nx) {
         let low_cell: u64 = col;
         let high_cell: u64 = (ny - 1) * nx + col;
-        let low_grad: f64 = boundary_pressure_gradient(boundaries.bottom, pressure_ptr[low_cell], pressure_ptr[high_cell], dy, true);
-        let high_grad: f64 = boundary_pressure_gradient(boundaries.top, pressure_ptr[high_cell], pressure_ptr[low_cell], dy, false);
+        let low_grad: f64 = boundary_pressure_gradient(
+                boundaries.bottom, pressure_ptr[low_cell],
+                pressure_ptr[high_cell], dy, true);
+        let high_grad: f64 = boundary_pressure_gradient(
+                boundaries.top, pressure_ptr[high_cell], pressure_ptr[low_cell],
+                dy, false);
         v_ptr[col] = v_ptr[col] - correction_scale * low_grad;
-        v_ptr[ny * nx + col] = v_ptr[ny * nx + col] - correction_scale * high_grad;
-        if (is_periodic(boundaries.bottom.kind)) { v_ptr[ny * nx + col] = v_ptr[col]; }
+        v_ptr[ny * nx + col] = v_ptr[ny * nx + col] - correction_scale *
+            high_grad;
+
+        if (is_periodic(boundaries.bottom.kind)) {
+            v_ptr[ny * nx + col] = v_ptr[col];
+        }
     }
-    validate_finite_result(u_faces)?; validate_finite_result(v_faces)?;
+
+    validate_finite_result(u_faces)?;
+    validate_finite_result(v_faces)?;
     mac_divergence_2d(nx, ny, dx, dy, u_faces, v_faces, divergence)?;
     let final_divergence: f64 = max_abs(divergence)?;
     return Ok(ProjectionReport {
         iterations: iterations, pressure_residual: pressure_residual,
-        initial_divergence_max: initial_divergence, final_divergence_max: final_divergence,
-        converged: converged
+        initial_divergence_max: initial_divergence,
+        final_divergence_max: final_divergence, converged: converged
     });
 }
 
@@ -868,51 +1343,85 @@ pub fn project_incompressible_mac_2d(
 // convection plus centred viscous diffusion. Boundary faces are copied; the
 // projection step follows this predictor to restore incompressibility.
 pub fn mac_momentum_predictor_2d(
-    nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, viscosity: f64,
-    u: Span<f64>, v: Span<f64>, u_star: Span<f64>, v_star: Span<f64>
+    nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, viscosity: f64, u: Span<f64>,
+    v: Span<f64>, u_star: Span<f64>, v_star: Span<f64>
 ) -> Result<u64, FluidError> {
-    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) {
+        return Err(InvalidSpacing);
+    }
+
     if (!finite_f64(dt) || dt <= 0.0) { return Err(InvalidTimestep); }
-    if (!finite_f64(viscosity) || viscosity < 0.0) { return Err(InvalidViscosity); }
-    if (u.len != mac_u_face_count_2d(nx, ny)? || u_star.len != u.len || v.len != mac_v_face_count_2d(nx, ny)? || v_star.len != v.len) { return Err(DimensionMismatch); }
-    validate_finite(u)?; validate_finite(v)?;
-    let mut us_ptr: *f64 = u_star.ptr; let mut vs_ptr: *f64 = v_star.ptr;
+
+    if (!finite_f64(viscosity) || viscosity < 0.0) {
+        return Err(InvalidViscosity);
+    }
+
+    if (u.len != mac_u_face_count_2d(nx, ny)? || u_star.len != u.len || v.len !=
+        mac_v_face_count_2d(nx, ny)? || v_star.len != v.len) {
+        return Err(DimensionMismatch);
+    }
+
+    validate_finite(u)?;
+    validate_finite(v)?;
+    let mut us_ptr: *f64 = u_star.ptr;
+    let mut vs_ptr: *f64 = v_star.ptr;
     parfor (i in 0..u.len) { us_ptr[i] = u.ptr[i]; }
     parfor (i in 0..v.len) { vs_ptr[i] = v.ptr[i]; }
-    let inv_dx: f64 = 1.0 / dx; let inv_dy: f64 = 1.0 / dy;
-    let inv_dx2: f64 = inv_dx * inv_dx; let inv_dy2: f64 = inv_dy * inv_dy;
-    if (!finite_f64(inv_dx) || !finite_f64(inv_dy) || !finite_f64(inv_dx2) || !finite_f64(inv_dy2)) { return Err(NonFiniteResult); }
+    let inv_dx: f64 = 1.0 / dx;
+    let inv_dy: f64 = 1.0 / dy;
+    let inv_dx2: f64 = inv_dx * inv_dx;
+    let inv_dy2: f64 = inv_dy * inv_dy;
+
+    if (!finite_f64(inv_dx) || !finite_f64(inv_dy) || !finite_f64(inv_dx2) ||
+        !finite_f64(inv_dy2)) { return Err(NonFiniteResult); }
+
     parfor (row in 1..(ny - 1)) {
         for (col in 1..nx) {
             let index: u64 = row * (nx + 1) + col;
             let here: f64 = u.ptr[index];
-            let left: f64 = u.ptr[index - 1]; let right: f64 = u.ptr[index + 1];
-            let below: f64 = u.ptr[index - (nx + 1)]; let above: f64 = u.ptr[index + (nx + 1)];
-            let v_here: f64 = 0.25 * (v.ptr[row * nx + col - 1] + v.ptr[row * nx + col] + v.ptr[(row + 1) * nx + col - 1] + v.ptr[(row + 1) * nx + col]);
+            let left: f64 = u.ptr[index - 1];
+            let right: f64 = u.ptr[index + 1];
+            let below: f64 = u.ptr[index - (nx + 1)];
+            let above: f64 = u.ptr[index + (nx + 1)];
+            let v_here: f64 = 0.25 *
+                (v.ptr[row * nx + col - 1] + v.ptr[row * nx + col] +
+                v.ptr[(row + 1) * nx + col - 1] + v.ptr[(row + 1) * nx + col]);
             let mut du_dx: f64 = (right - here) * inv_dx;
             let mut du_dy: f64 = (above - here) * inv_dy;
             if (here >= 0.0) { du_dx = (here - left) * inv_dx; }
             if (v_here >= 0.0) { du_dy = (here - below) * inv_dy; }
-            let laplace: f64 = (left - 2.0 * here + right) * inv_dx2 + (below - 2.0 * here + above) * inv_dy2;
-            us_ptr[index] = here + dt * (-here * du_dx - v_here * du_dy + viscosity * laplace);
+            let laplace: f64 = (left - 2.0 * here + right) * inv_dx2 +
+                (below - 2.0 * here + above) * inv_dy2;
+            us_ptr[index] = here + dt *
+                (-here * du_dx - v_here * du_dy + viscosity * laplace);
         }
     }
+
     parfor (row in 1..ny) {
         for (col in 1..(nx - 1)) {
             let index: u64 = row * nx + col;
             let here: f64 = v.ptr[index];
-            let left: f64 = v.ptr[index - 1]; let right: f64 = v.ptr[index + 1];
-            let below: f64 = v.ptr[index - nx]; let above: f64 = v.ptr[index + nx];
-            let u_here: f64 = 0.25 * (u.ptr[(row - 1) * (nx + 1) + col] + u.ptr[(row - 1) * (nx + 1) + col + 1] + u.ptr[row * (nx + 1) + col] + u.ptr[row * (nx + 1) + col + 1]);
+            let left: f64 = v.ptr[index - 1];
+            let right: f64 = v.ptr[index + 1];
+            let below: f64 = v.ptr[index - nx];
+            let above: f64 = v.ptr[index + nx];
+            let u_here: f64 = 0.25 *
+                (u.ptr[(row - 1) * (nx + 1) + col] +
+                u.ptr[(row - 1) * (nx + 1) + col + 1] +
+                u.ptr[row * (nx + 1) + col] + u.ptr[row * (nx + 1) + col + 1]);
             let mut dv_dx: f64 = (right - here) * inv_dx;
             let mut dv_dy: f64 = (above - here) * inv_dy;
             if (u_here >= 0.0) { dv_dx = (here - left) * inv_dx; }
             if (here >= 0.0) { dv_dy = (here - below) * inv_dy; }
-            let laplace: f64 = (left - 2.0 * here + right) * inv_dx2 + (below - 2.0 * here + above) * inv_dy2;
-            vs_ptr[index] = here + dt * (-u_here * dv_dx - here * dv_dy + viscosity * laplace);
+            let laplace: f64 = (left - 2.0 * here + right) * inv_dx2 +
+                (below - 2.0 * here + above) * inv_dy2;
+            vs_ptr[index] = here + dt *
+                (-u_here * dv_dx - here * dv_dy + viscosity * laplace);
         }
     }
-    validate_finite_result(u_star)?; validate_finite_result(v_star)?;
+
+    validate_finite_result(u_star)?;
+    validate_finite_result(v_star)?;
     return Ok(u.len + v.len);
 }
 
@@ -921,15 +1430,18 @@ pub fn mac_momentum_predictor_2d(
 pub fn cavity_step_2d(
     nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, density: f64, viscosity: f64,
     boundaries: MACBoundaryConditions2D, u: Span<f64>, v: Span<f64>,
-    u_star: Span<f64>, v_star: Span<f64>, pressure: Span<f64>, pressure_scratch: Span<f64>,
-    divergence: Span<f64>, max_iterations: u64, tolerance: f64
+    u_star: Span<f64>, v_star: Span<f64>, pressure: Span<f64>,
+    pressure_scratch: Span<f64>, divergence: Span<f64>, max_iterations: u64,
+    tolerance: f64
 ) -> Result<ProjectionReport, FluidError> {
     mac_apply_velocity_boundaries_2d(nx, ny, boundaries, u, v)?;
-    mac_momentum_predictor_2d(nx, ny, dx, dy, dt, viscosity, u, v, u_star, v_star)?;
+    mac_momentum_predictor_2d(
+            nx, ny, dx, dy, dt, viscosity, u, v, u_star, v_star)?;
     let report: ProjectionReport = project_incompressible_mac_2d(
-        nx, ny, dx, dy, dt, density, boundaries, u_star, v_star,
-        pressure, pressure_scratch, divergence, max_iterations, tolerance)?;
-    let mut u_ptr: *f64 = u.ptr; let mut v_ptr: *f64 = v.ptr;
+            nx, ny, dx, dy, dt, density, boundaries, u_star, v_star, pressure,
+            pressure_scratch, divergence, max_iterations, tolerance)?;
+    let mut u_ptr: *f64 = u.ptr;
+    let mut v_ptr: *f64 = v.ptr;
     parfor (i in 0..u.len) { u_ptr[i] = u_star.ptr[i]; }
     parfor (i in 0..v.len) { v_ptr[i] = v_star.ptr[i]; }
     return Ok(report);
@@ -948,7 +1460,6 @@ pub fn cavity_step_2d(
 // both transfer kernels index only existing cells, no boundary-specific
 // clamping or wrapping is required at any level.
 // ---------------------------------------------------------------------------
-
 // The MAC pressure operator with full boundary data: out = A*p where A is
 // the D*G closure used by project_incompressible_mac_2d (A is the negative
 // discrete Laplacian: neighbour_sum - diagonal*p + source). This kernel is
@@ -958,50 +1469,97 @@ pub fn mac_pressure_operator_apply_2d(
     nx: u64, ny: u64, dx: f64, dy: f64, boundaries: MACBoundaryConditions2D,
     pressure: Span<f64>, output: Span<f64>
 ) -> Result<u64, FluidError> {
-    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) {
+        return Err(InvalidSpacing);
+    }
+
     validate_boundaries(boundaries)?;
     let cells: u64 = grid_cell_count_2d(nx, ny)?;
-    if (pressure.len != cells || output.len != cells) { return Err(DimensionMismatch); }
+
+    if (pressure.len != cells || output.len != cells) {
+        return Err(DimensionMismatch);
+    }
+
     validate_finite(pressure)?;
-    let inv_dx: f64 = 1.0 / dx; let inv_dy: f64 = 1.0 / dy;
-    if (!finite_f64(inv_dx) || !finite_f64(inv_dy)) { return Err(NonFiniteResult); }
-    let inv_dx2: f64 = inv_dx * inv_dx; let inv_dy2: f64 = inv_dy * inv_dy;
-    if (!finite_f64(inv_dx2) || !finite_f64(inv_dy2)) { return Err(NonFiniteResult); }
+    let inv_dx: f64 = 1.0 / dx;
+    let inv_dy: f64 = 1.0 / dy;
+
+    if (!finite_f64(inv_dx) || !finite_f64(inv_dy)) {
+        return Err(NonFiniteResult);
+    }
+
+    let inv_dx2: f64 = inv_dx * inv_dx;
+    let inv_dy2: f64 = inv_dy * inv_dy;
+
+    if (!finite_f64(inv_dx2) || !finite_f64(inv_dy2)) {
+        return Err(NonFiniteResult);
+    }
+
     let mut out_ptr: *f64 = output.ptr;
     let pressure_ptr: *f64 = pressure.ptr;
+
     parfor (row in 0..ny) {
         for (col in 0..nx) {
             let cell: u64 = row * nx + col;
             let mut neighbour_sum: f64 = 0.0;
             let mut diagonal: f64 = 0.0;
             let mut source: f64 = 0.0;
-            if (col > 0) { neighbour_sum = neighbour_sum + pressure_ptr[cell - 1] * inv_dx2; diagonal = diagonal + inv_dx2; }
-            else {
-                neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.left, pressure_ptr[row * nx + nx - 1], inv_dx2);
-                diagonal = diagonal + pressure_face_diagonal(boundaries.left, inv_dx2);
+
+            if (col > 0) {
+                neighbour_sum = neighbour_sum + pressure_ptr[cell - 1] *
+                    inv_dx2;
+                diagonal = diagonal + inv_dx2;
+            } else {
+                neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(
+                        boundaries.left, pressure_ptr[row * nx + nx - 1],
+                        inv_dx2);
+                diagonal = diagonal + pressure_face_diagonal(
+                        boundaries.left, inv_dx2);
                 source = source + pressure_face_source(boundaries.left, dx);
             }
-            if (col + 1 < nx) { neighbour_sum = neighbour_sum + pressure_ptr[cell + 1] * inv_dx2; diagonal = diagonal + inv_dx2; }
-            else {
-                neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.right, pressure_ptr[row * nx], inv_dx2);
-                diagonal = diagonal + pressure_face_diagonal(boundaries.right, inv_dx2);
+
+            if (col + 1 < nx) {
+                neighbour_sum = neighbour_sum + pressure_ptr[cell + 1] *
+                    inv_dx2;
+                diagonal = diagonal + inv_dx2;
+            } else {
+                neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(
+                        boundaries.right, pressure_ptr[row * nx], inv_dx2);
+                diagonal = diagonal + pressure_face_diagonal(
+                        boundaries.right, inv_dx2);
                 source = source + pressure_face_source(boundaries.right, dx);
             }
-            if (row > 0) { neighbour_sum = neighbour_sum + pressure_ptr[cell - nx] * inv_dy2; diagonal = diagonal + inv_dy2; }
-            else {
-                neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.bottom, pressure_ptr[(ny - 1) * nx + col], inv_dy2);
-                diagonal = diagonal + pressure_face_diagonal(boundaries.bottom, inv_dy2);
+
+            if (row > 0) {
+                neighbour_sum = neighbour_sum + pressure_ptr[cell - nx] *
+                    inv_dy2;
+                diagonal = diagonal + inv_dy2;
+            } else {
+                neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(
+                        boundaries.bottom, pressure_ptr[(ny - 1) * nx + col],
+                        inv_dy2);
+                diagonal = diagonal + pressure_face_diagonal(
+                        boundaries.bottom, inv_dy2);
                 source = source + pressure_face_source(boundaries.bottom, dy);
             }
-            if (row + 1 < ny) { neighbour_sum = neighbour_sum + pressure_ptr[cell + nx] * inv_dy2; diagonal = diagonal + inv_dy2; }
-            else {
-                neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.top, pressure_ptr[col], inv_dy2);
-                diagonal = diagonal + pressure_face_diagonal(boundaries.top, inv_dy2);
+
+            if (row + 1 < ny) {
+                neighbour_sum = neighbour_sum + pressure_ptr[cell + nx] *
+                    inv_dy2;
+                diagonal = diagonal + inv_dy2;
+            } else {
+                neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(
+                        boundaries.top, pressure_ptr[col], inv_dy2);
+                diagonal = diagonal + pressure_face_diagonal(
+                        boundaries.top, inv_dy2);
                 source = source + pressure_face_source(boundaries.top, dy);
             }
-            out_ptr[cell] = neighbour_sum - diagonal * pressure_ptr[cell] + source;
+
+            out_ptr[cell] = neighbour_sum - diagonal * pressure_ptr[cell] +
+                source;
         }
     }
+
     validate_finite_result(output)?;
     return Ok(cells);
 }
@@ -1013,40 +1571,66 @@ pub fn mac_pressure_diagonal_2d(
     nx: u64, ny: u64, dx: f64, dy: f64, boundaries: MACBoundaryConditions2D,
     diagonal: Span<f64>
 ) -> Result<u64, FluidError> {
-    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) {
+        return Err(InvalidSpacing);
+    }
+
     validate_boundaries(boundaries)?;
     let cells: u64 = grid_cell_count_2d(nx, ny)?;
     if (diagonal.len != cells) { return Err(DimensionMismatch); }
-    let inv_dx: f64 = 1.0 / dx; let inv_dy: f64 = 1.0 / dy;
-    if (!finite_f64(inv_dx) || !finite_f64(inv_dy)) { return Err(NonFiniteResult); }
-    let inv_dx2: f64 = inv_dx * inv_dx; let inv_dy2: f64 = inv_dy * inv_dy;
-    if (!finite_f64(inv_dx2) || !finite_f64(inv_dy2)) { return Err(NonFiniteResult); }
+    let inv_dx: f64 = 1.0 / dx;
+    let inv_dy: f64 = 1.0 / dy;
+
+    if (!finite_f64(inv_dx) || !finite_f64(inv_dy)) {
+        return Err(NonFiniteResult);
+    }
+
+    let inv_dx2: f64 = inv_dx * inv_dx;
+    let inv_dy2: f64 = inv_dy * inv_dy;
+
+    if (!finite_f64(inv_dx2) || !finite_f64(inv_dy2)) {
+        return Err(NonFiniteResult);
+    }
+
     let mut diagonal_ptr: *f64 = diagonal.ptr;
+
     parfor (row in 0..ny) {
         for (col in 0..nx) {
             let cell: u64 = row * nx + col;
             let mut value: f64 = 0.0;
-            value = value + inv_dx2; value = value + inv_dx2;
-            value = value + inv_dy2; value = value + inv_dy2;
+            value = value + inv_dx2;
+            value = value + inv_dx2;
+            value = value + inv_dy2;
+            value = value + inv_dy2;
+
             if (col == 0) {
                 value = value - inv_dx2;
-                value = value + pressure_face_diagonal(boundaries.left, inv_dx2);
+                value = value + pressure_face_diagonal(
+                        boundaries.left, inv_dx2);
             }
+
             if (col + 1 == nx) {
                 value = value - inv_dx2;
-                value = value + pressure_face_diagonal(boundaries.right, inv_dx2);
+                value = value + pressure_face_diagonal(
+                        boundaries.right, inv_dx2);
             }
+
             if (row == 0) {
                 value = value - inv_dy2;
-                value = value + pressure_face_diagonal(boundaries.bottom, inv_dy2);
+                value = value + pressure_face_diagonal(
+                        boundaries.bottom, inv_dy2);
             }
+
             if (row + 1 == ny) {
                 value = value - inv_dy2;
-                value = value + pressure_face_diagonal(boundaries.top, inv_dy2);
+                value = value + pressure_face_diagonal(
+                        boundaries.top, inv_dy2);
             }
+
             diagonal_ptr[cell] = value;
         }
     }
+
     validate_finite_result(diagonal)?;
     return Ok(cells);
 }
@@ -1055,12 +1639,32 @@ pub fn mac_pressure_diagonal_2d(
 // system has homogeneous Dirichlet/Neumann data, so every multigrid level
 // reuses the fine-level boundary KINDS with zero values. An ordinary
 // function (not @pure) because it constructs a struct literal.
-fn homogeneous_boundary_set_2d(boundaries: MACBoundaryConditions2D) -> MACBoundaryConditions2D {
-    let left: BoundaryCondition2D = BoundaryCondition2D { kind: boundaries.left.kind, normal_velocity: 0.0, tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0 };
-    let right: BoundaryCondition2D = BoundaryCondition2D { kind: boundaries.right.kind, normal_velocity: 0.0, tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0 };
-    let bottom: BoundaryCondition2D = BoundaryCondition2D { kind: boundaries.bottom.kind, normal_velocity: 0.0, tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0 };
-    let top: BoundaryCondition2D = BoundaryCondition2D { kind: boundaries.top.kind, normal_velocity: 0.0, tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0 };
-    return MACBoundaryConditions2D { left: left, right: right, bottom: bottom, top: top };
+fn homogeneous_boundary_set_2d(
+    boundaries: MACBoundaryConditions2D
+) -> MACBoundaryConditions2D {
+    let left: BoundaryCondition2D = BoundaryCondition2D {
+        kind: boundaries.left.kind, normal_velocity: 0.0,
+        tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0
+    };
+
+    let right: BoundaryCondition2D = BoundaryCondition2D {
+        kind: boundaries.right.kind, normal_velocity: 0.0,
+        tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0
+    };
+
+    let bottom: BoundaryCondition2D = BoundaryCondition2D {
+        kind: boundaries.bottom.kind, normal_velocity: 0.0,
+        tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0
+    };
+
+    let top: BoundaryCondition2D = BoundaryCondition2D {
+        kind: boundaries.top.kind, normal_velocity: 0.0,
+        tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0
+    };
+
+    return MACBoundaryConditions2D {
+        left: left, right: right, bottom: bottom, top: top
+    };
 }
 
 // Weighted-Jacobi sweeps toward A*state = rhs with the supplied boundary
@@ -1069,23 +1673,46 @@ fn homogeneous_boundary_set_2d(boundaries: MACBoundaryConditions2D) -> MACBounda
 // exactly like the Jacobi sweep of project_incompressible_mac_2d.
 fn pressure_jacobi_sweep_2d(
     nx: u64, ny: u64, dx: f64, dy: f64, boundaries: MACBoundaryConditions2D,
-    rhs: Span<f64>, state: Span<f64>, scratch: Span<f64>, sweeps: u64, omega: f64
+    rhs: Span<f64>, state: Span<f64>, scratch: Span<f64>, sweeps: u64,
+    omega: f64
 ) -> Result<u64, FluidError> {
-    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) {
+        return Err(InvalidSpacing);
+    }
+
     validate_boundaries(boundaries)?;
-    if (!finite_f64(omega) || omega <= 0.0 || omega >= 2.0) { return Err(InvalidRelaxation); }
+
+    if (!finite_f64(omega) || omega <= 0.0 || omega >= 2.0) {
+        return Err(InvalidRelaxation);
+    }
+
     if (sweeps == 0) { return Err(InvalidRelaxation); }
     let cells: u64 = grid_cell_count_2d(nx, ny)?;
-    if (rhs.len != cells || state.len != cells || scratch.len != cells) { return Err(DimensionMismatch); }
+
+    if (rhs.len != cells || state.len != cells || scratch.len != cells) {
+        return Err(DimensionMismatch);
+    }
+
     validate_finite(rhs)?;
     validate_finite(state)?;
-    let inv_dx: f64 = 1.0 / dx; let inv_dy: f64 = 1.0 / dy;
-    if (!finite_f64(inv_dx) || !finite_f64(inv_dy)) { return Err(NonFiniteResult); }
-    let inv_dx2: f64 = inv_dx * inv_dx; let inv_dy2: f64 = inv_dy * inv_dy;
-    if (!finite_f64(inv_dx2) || !finite_f64(inv_dy2)) { return Err(NonFiniteResult); }
+    let inv_dx: f64 = 1.0 / dx;
+    let inv_dy: f64 = 1.0 / dy;
+
+    if (!finite_f64(inv_dx) || !finite_f64(inv_dy)) {
+        return Err(NonFiniteResult);
+    }
+
+    let inv_dx2: f64 = inv_dx * inv_dx;
+    let inv_dy2: f64 = inv_dy * inv_dy;
+
+    if (!finite_f64(inv_dx2) || !finite_f64(inv_dy2)) {
+        return Err(NonFiniteResult);
+    }
+
     let mut state_ptr: *f64 = state.ptr;
     let mut scratch_ptr: *f64 = scratch.ptr;
     let rhs_ptr: *f64 = rhs.ptr;
+
     for (sweep in 0..sweeps) {
         parfor (row in 0..ny) {
             for (col in 0..nx) {
@@ -1093,38 +1720,72 @@ fn pressure_jacobi_sweep_2d(
                 let mut neighbour_sum: f64 = 0.0;
                 let mut diagonal: f64 = 0.0;
                 let mut source: f64 = 0.0;
-                if (col > 0) { neighbour_sum = neighbour_sum + state_ptr[cell - 1] * inv_dx2; diagonal = diagonal + inv_dx2; }
-                else {
-                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.left, state_ptr[row * nx + nx - 1], inv_dx2);
-                    diagonal = diagonal + pressure_face_diagonal(boundaries.left, inv_dx2);
-                    source = source + pressure_face_source(boundaries.left, dx);
+
+                if (col > 0) {
+                    neighbour_sum = neighbour_sum + state_ptr[cell - 1] *
+                        inv_dx2;
+                    diagonal = diagonal + inv_dx2;
+                } else {
+                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(
+                            boundaries.left, state_ptr[row * nx + nx - 1],
+                            inv_dx2);
+                    diagonal = diagonal + pressure_face_diagonal(
+                            boundaries.left, inv_dx2);
+                    source = source + pressure_face_source(
+                            boundaries.left, dx);
                 }
-                if (col + 1 < nx) { neighbour_sum = neighbour_sum + state_ptr[cell + 1] * inv_dx2; diagonal = diagonal + inv_dx2; }
-                else {
-                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.right, state_ptr[row * nx], inv_dx2);
-                    diagonal = diagonal + pressure_face_diagonal(boundaries.right, inv_dx2);
-                    source = source + pressure_face_source(boundaries.right, dx);
+
+                if (col + 1 < nx) {
+                    neighbour_sum = neighbour_sum + state_ptr[cell + 1] *
+                        inv_dx2;
+                    diagonal = diagonal + inv_dx2;
+                } else {
+                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(
+                            boundaries.right, state_ptr[row * nx], inv_dx2);
+                    diagonal = diagonal + pressure_face_diagonal(
+                            boundaries.right, inv_dx2);
+                    source = source + pressure_face_source(
+                            boundaries.right, dx);
                 }
-                if (row > 0) { neighbour_sum = neighbour_sum + state_ptr[cell - nx] * inv_dy2; diagonal = diagonal + inv_dy2; }
-                else {
-                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.bottom, state_ptr[(ny - 1) * nx + col], inv_dy2);
-                    diagonal = diagonal + pressure_face_diagonal(boundaries.bottom, inv_dy2);
-                    source = source + pressure_face_source(boundaries.bottom, dy);
+
+                if (row > 0) {
+                    neighbour_sum = neighbour_sum + state_ptr[cell - nx] *
+                        inv_dy2;
+                    diagonal = diagonal + inv_dy2;
+                } else {
+                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(
+                            boundaries.bottom, state_ptr[(ny - 1) * nx + col],
+                            inv_dy2);
+                    diagonal = diagonal + pressure_face_diagonal(
+                            boundaries.bottom, inv_dy2);
+                    source = source + pressure_face_source(
+                            boundaries.bottom, dy);
                 }
-                if (row + 1 < ny) { neighbour_sum = neighbour_sum + state_ptr[cell + nx] * inv_dy2; diagonal = diagonal + inv_dy2; }
-                else {
-                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.top, state_ptr[col], inv_dy2);
-                    diagonal = diagonal + pressure_face_diagonal(boundaries.top, inv_dy2);
+
+                if (row + 1 < ny) {
+                    neighbour_sum = neighbour_sum + state_ptr[cell + nx] *
+                        inv_dy2;
+                    diagonal = diagonal + inv_dy2;
+                } else {
+                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(
+                            boundaries.top, state_ptr[col], inv_dy2);
+                    diagonal = diagonal + pressure_face_diagonal(
+                            boundaries.top, inv_dy2);
                     source = source + pressure_face_source(boundaries.top, dy);
                 }
-                let target: f64 = (neighbour_sum + source - rhs_ptr[cell]) / diagonal;
-                scratch_ptr[cell] = omega * target + (1.0 - omega) * state_ptr[cell];
+
+                let target: f64 = (neighbour_sum + source - rhs_ptr[cell]) /
+                    diagonal;
+                scratch_ptr[cell] = omega * target + (1.0 - omega) *
+                    state_ptr[cell];
             }
         }
+
         validate_finite_result(scratch)?;
         parfor (i in 0..cells) { state_ptr[i] = scratch_ptr[i]; }
         validate_finite_result(state)?;
     }
+
     return Ok(cells * sweeps);
 }
 
@@ -1136,14 +1797,23 @@ fn pressure_jacobi_sweep_2d(
 pub fn mac_restrict_full_weighting_2d(
     nx_fine: u64, ny_fine: u64, fine: Span<f64>, coarse: Span<f64>
 ) -> Result<u64, FluidError> {
-    if (nx_fine < 2 || ny_fine < 2 || nx_fine % 2 != 0 || ny_fine % 2 != 0) { return Err(InvalidGrid); }
+    if (nx_fine < 2 || ny_fine < 2 || nx_fine % 2 != 0 || ny_fine % 2 != 0) {
+        return Err(InvalidGrid);
+    }
+
     let coarse_columns: u64 = nx_fine / 2;
     let coarse_rows: u64 = ny_fine / 2;
-    let coarse_cells: u64 = checked_fluid_size(checked_mul(coarse_columns, coarse_rows))?;
+    let coarse_cells: u64 =
+        checked_fluid_size(checked_mul(coarse_columns, coarse_rows))?;
     let fine_cells: u64 = checked_fluid_size(checked_mul(nx_fine, ny_fine))?;
-    if (fine.len != fine_cells || coarse.len != coarse_cells) { return Err(DimensionMismatch); }
+
+    if (fine.len != fine_cells || coarse.len != coarse_cells) {
+        return Err(DimensionMismatch);
+    }
+
     validate_finite(fine)?;
     let mut coarse_ptr: *f64 = coarse.ptr;
+
     parfor (coarse_row in 0..coarse_rows) {
         for (coarse_col in 0..coarse_columns) {
             let coarse_cell: u64 = coarse_row * coarse_columns + coarse_col;
@@ -1151,10 +1821,12 @@ pub fn mac_restrict_full_weighting_2d(
             let row_high: u64 = (2 * coarse_row + 1) * nx_fine;
             let col_low: u64 = 2 * coarse_col;
             let col_high: u64 = 2 * coarse_col + 1;
-            coarse_ptr[coarse_cell] = 0.25 * (fine.ptr[row_low + col_low] + fine.ptr[row_low + col_high] +
-                                             fine.ptr[row_high + col_low] + fine.ptr[row_high + col_high]);
+            coarse_ptr[coarse_cell] = 0.25 *
+                (fine.ptr[row_low + col_low] + fine.ptr[row_low + col_high] +
+                fine.ptr[row_high + col_low] + fine.ptr[row_high + col_high]);
         }
     }
+
     validate_finite_result(coarse)?;
     return Ok(coarse_cells);
 }
@@ -1165,29 +1837,45 @@ pub fn mac_restrict_full_weighting_2d(
 // iteration writes four distinct fine cells and reads only coarse values.
 // No division: parent indices are derived from the coarse loop counters.
 pub fn mac_prolongate_constant_2d(
-    nx_fine: u64, ny_fine: u64, coarse: Span<f64>, fine: Span<f64>, accumulate: bool
+    nx_fine: u64, ny_fine: u64, coarse: Span<f64>, fine: Span<f64>,
+    accumulate: bool
 ) -> Result<u64, FluidError> {
-    if (nx_fine < 2 || ny_fine < 2 || nx_fine % 2 != 0 || ny_fine % 2 != 0) { return Err(InvalidGrid); }
+    if (nx_fine < 2 || ny_fine < 2 || nx_fine % 2 != 0 || ny_fine % 2 != 0) {
+        return Err(InvalidGrid);
+    }
+
     let coarse_columns: u64 = nx_fine / 2;
     let coarse_rows: u64 = ny_fine / 2;
-    let coarse_cells: u64 = checked_fluid_size(checked_mul(coarse_columns, coarse_rows))?;
+    let coarse_cells: u64 =
+        checked_fluid_size(checked_mul(coarse_columns, coarse_rows))?;
     let fine_cells: u64 = checked_fluid_size(checked_mul(nx_fine, ny_fine))?;
-    if (fine.len != fine_cells || coarse.len != coarse_cells) { return Err(DimensionMismatch); }
+
+    if (fine.len != fine_cells || coarse.len != coarse_cells) {
+        return Err(DimensionMismatch);
+    }
+
     validate_finite(coarse)?;
     if (accumulate) { validate_finite(fine)?; }
     let mut fine_ptr: *f64 = fine.ptr;
+
     parfor (coarse_row in 0..coarse_rows) {
         for (coarse_col in 0..coarse_columns) {
-            let value: f64 = coarse.ptr[coarse_row * coarse_columns + coarse_col];
+            let value: f64 =
+                coarse.ptr[coarse_row * coarse_columns + coarse_col];
             let row_low: u64 = 2 * coarse_row * nx_fine;
             let row_high: u64 = (2 * coarse_row + 1) * nx_fine;
             let col_low: u64 = 2 * coarse_col;
             let col_high: u64 = 2 * coarse_col + 1;
+
             if (accumulate) {
-                fine_ptr[row_low + col_low] = fine_ptr[row_low + col_low] + value;
-                fine_ptr[row_low + col_high] = fine_ptr[row_low + col_high] + value;
-                fine_ptr[row_high + col_low] = fine_ptr[row_high + col_low] + value;
-                fine_ptr[row_high + col_high] = fine_ptr[row_high + col_high] + value;
+                fine_ptr[row_low + col_low] = fine_ptr[row_low + col_low] +
+                    value;
+                fine_ptr[row_low + col_high] = fine_ptr[row_low + col_high] +
+                    value;
+                fine_ptr[row_high + col_low] = fine_ptr[row_high + col_low] +
+                    value;
+                fine_ptr[row_high + col_high] = fine_ptr[row_high + col_high] +
+                    value;
             } else {
                 fine_ptr[row_low + col_low] = value;
                 fine_ptr[row_low + col_high] = value;
@@ -1196,6 +1884,7 @@ pub fn mac_prolongate_constant_2d(
             }
         }
     }
+
     validate_finite_result(fine)?;
     return Ok(fine_cells);
 }
@@ -1204,16 +1893,20 @@ pub fn mac_prolongate_constant_2d(
 // grid; coarsening continues while both dimensions are even and at least six
 // cells wide (halving keeps every level >= 3 cells). Odd grids simply keep
 // level 1, i.e. plain smoothing.
-pub fn mac_multigrid_level_count_2d(nx: u64, ny: u64) -> Result<u64, FluidError> {
+pub fn mac_multigrid_level_count_2d(
+    nx: u64, ny: u64
+) -> Result<u64, FluidError> {
     if (nx < 3 || ny < 3) { return Err(InvalidGrid); }
     let mut levels: u64 = 1;
     let mut cx: u64 = nx;
     let mut cy: u64 = ny;
+
     while (cx >= 6 && cy >= 6 && cx % 2 == 0 && cy % 2 == 0) {
         cx = cx / 2;
         cy = cy / 2;
         levels = levels + 1;
     }
+
     return Ok(levels);
 }
 
@@ -1223,11 +1916,14 @@ pub fn mac_multigrid_level_count_2d(nx: u64, ny: u64) -> Result<u64, FluidError>
 //   n_0 + 3 * (n_1 + ... + n_{levels-1}).
 // The finest-level rhs, error and solution spans are caller-provided and are
 // deliberately not part of this requirement.
-pub fn mac_multigrid_workspace_requirement_2d(nx: u64, ny: u64) -> Result<u64, FluidError> {
+pub fn mac_multigrid_workspace_requirement_2d(
+    nx: u64, ny: u64
+) -> Result<u64, FluidError> {
     if (nx < 3 || ny < 3) { return Err(InvalidGrid); }
     let mut total: u64 = checked_fluid_size(checked_mul(nx, ny))?;
     let mut cx: u64 = nx;
     let mut cy: u64 = ny;
+
     while (cx >= 6 && cy >= 6 && cx % 2 == 0 && cy % 2 == 0) {
         cx = cx / 2;
         cy = cy / 2;
@@ -1235,6 +1931,7 @@ pub fn mac_multigrid_workspace_requirement_2d(nx: u64, ny: u64) -> Result<u64, F
         let triple: u64 = checked_fluid_size(checked_mul(3, level_cells))?;
         total = checked_fluid_size(checked_add(total, triple))?;
     }
+
     return Ok(total);
 }
 
@@ -1251,15 +1948,29 @@ pub fn mac_multigrid_workspace_requirement_2d(nx: u64, ny: u64) -> Result<u64, F
 // mac_multigrid_workspace_requirement_2d for the requested level count.
 pub fn mac_pressure_v_cycle_2d(
     nx: u64, ny: u64, dx: f64, dy: f64, boundaries: MACBoundaryConditions2D,
-    rhs: Span<f64>, error: Span<f64>, work: Span<f64>,
-    levels: u64, pre_smooth: u64, post_smooth: u64, coarse_sweeps: u64, omega: f64
+    rhs: Span<f64>, error: Span<f64>, work: Span<f64>, levels: u64,
+    pre_smooth: u64, post_smooth: u64, coarse_sweeps: u64, omega: f64
 ) -> Result<u64, FluidError> {
-    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) {
+        return Err(InvalidSpacing);
+    }
+
     validate_boundaries(boundaries)?;
-    if (!finite_f64(omega) || omega <= 0.0 || omega >= 2.0) { return Err(InvalidRelaxation); }
-    if (pre_smooth == 0 || post_smooth == 0 || coarse_sweeps == 0) { return Err(InvalidRelaxation); }
+
+    if (!finite_f64(omega) || omega <= 0.0 || omega >= 2.0) {
+        return Err(InvalidRelaxation);
+    }
+
+    if (pre_smooth == 0 || post_smooth == 0 || coarse_sweeps == 0) {
+        return Err(InvalidRelaxation);
+    }
+
     let cells: u64 = grid_cell_count_2d(nx, ny)?;
-    if (rhs.len != cells || error.len != cells) { return Err(DimensionMismatch); }
+
+    if (rhs.len != cells || error.len != cells) {
+        return Err(DimensionMismatch);
+    }
+
     if (levels == 0) { return Err(InvalidGrid); }
     let max_levels: u64 = mac_multigrid_level_count_2d(nx, ny)?;
     if (levels > max_levels) { return Err(InvalidGrid); }
@@ -1268,6 +1979,7 @@ pub fn mac_pressure_v_cycle_2d(
     let mut cx: u64 = nx;
     let mut cy: u64 = ny;
     let mut remaining: u64 = levels;
+
     while (remaining > 1 && cx >= 6 && cy >= 6 && cx % 2 == 0 && cy % 2 == 0) {
         cx = cx / 2;
         cy = cy / 2;
@@ -1276,10 +1988,12 @@ pub fn mac_pressure_v_cycle_2d(
         required = checked_fluid_size(checked_add(required, triple))?;
         remaining = remaining - 1;
     }
+
     if (work.len < required) { return Err(DimensionMismatch); }
     validate_finite(rhs)?;
     validate_finite(error)?;
-    let homogenized: MACBoundaryConditions2D = homogeneous_boundary_set_2d(boundaries);
+    let homogenized: MACBoundaryConditions2D =
+        homogeneous_boundary_set_2d(boundaries);
     // Descent: level 0 uses the caller's rhs/error and the work prefix as
     // its defect; every deeper level's [rhs | error | defect] block follows.
     let mut level_nx: u64 = nx;
@@ -1292,11 +2006,15 @@ pub fn mac_pressure_v_cycle_2d(
     let mut current_rhs: Span<f64> = rhs;
     let mut current_error: Span<f64> = error;
     let mut current_defect: Span<f64> = work[0..cells];
+
     while (level + 1 < levels) {
-        pressure_jacobi_sweep_2d(level_nx, level_ny, level_hx, level_hy, homogenized,
-                                  current_rhs, current_error, current_defect, pre_smooth, omega)?;
-        mac_pressure_operator_apply_2d(level_nx, level_ny, level_hx, level_hy, homogenized,
-                                       current_error, current_defect)?;
+        pressure_jacobi_sweep_2d(
+                level_nx, level_ny, level_hx, level_hy, homogenized,
+                current_rhs, current_error, current_defect, pre_smooth, omega)?;
+        mac_pressure_operator_apply_2d(
+                level_nx, level_ny, level_hx, level_hy, homogenized,
+                current_error, current_defect)?;
+
         // The parfor write-root check resolves bindings at function scope
         // only, so the per-level pointer aliases are declared inside the
         // loop body (loop-local bindings are the supported shape).
@@ -1305,36 +2023,53 @@ pub fn mac_pressure_v_cycle_2d(
             let rhs_ptr: *f64 = current_rhs.ptr;
             defect_ptr[i] = rhs_ptr[i] - defect_ptr[i];
         }
+
         validate_finite_result(current_defect)?;
         let fine_nx: u64 = level_nx;
         let fine_ny: u64 = level_ny;
         let next_nx: u64 = level_nx / 2;
         let next_ny: u64 = level_ny / 2;
-        let next_cells: u64 = checked_fluid_size(checked_mul(next_nx, next_ny))?;
+        let next_cells: u64 =
+            checked_fluid_size(checked_mul(next_nx, next_ny))?;
         let next_triple: u64 = checked_fluid_size(checked_mul(3, next_cells))?;
-        let next_rhs: Span<f64> = work[level_offset..(level_offset + next_cells)];
-        let next_error: Span<f64> = work[(level_offset + next_cells)..(level_offset + next_cells + next_cells)];
-        let next_defect: Span<f64> = work[(level_offset + next_cells + next_cells)..(level_offset + next_triple)];
-        mac_restrict_full_weighting_2d(fine_nx, fine_ny, current_defect, next_rhs)?;
+        let next_rhs: Span<f64> =
+            work[level_offset..(level_offset + next_cells)];
+        let next_error: Span<f64> =
+            work[(level_offset + next_cells)..(level_offset + next_cells +
+            next_cells)];
+        let next_defect: Span<f64> =
+            work[(level_offset + next_cells + next_cells)..(level_offset +
+            next_triple)];
+        mac_restrict_full_weighting_2d(
+                fine_nx, fine_ny, current_defect, next_rhs)?;
+
         parfor (i in 0..next_cells) {
             let mut next_error_ptr: *f64 = next_error.ptr;
             next_error_ptr[i] = 0.0;
         }
+
         current_rhs = next_rhs;
         current_error = next_error;
         current_defect = next_defect;
         level_nx = next_nx;
         level_ny = next_ny;
         level_cells = next_cells;
-        level_offset = checked_fluid_size(checked_add(level_offset, next_triple))?;
+        level_offset =
+            checked_fluid_size(checked_add(level_offset, next_triple))?;
         level_hx = level_hx * 2.0;
         level_hy = level_hy * 2.0;
-        if (!finite_f64(level_hx) || !finite_f64(level_hy)) { return Err(NonFiniteResult); }
+
+        if (!finite_f64(level_hx) || !finite_f64(level_hy)) {
+            return Err(NonFiniteResult);
+        }
+
         level = level + 1;
     }
+
     // coarsest level: approximate solve by heavier smoothing
-    pressure_jacobi_sweep_2d(level_nx, level_ny, level_hx, level_hy, homogenized,
-                              current_rhs, current_error, current_defect, coarse_sweeps, omega)?;
+    pressure_jacobi_sweep_2d(
+            level_nx, level_ny, level_hx, level_hy, homogenized, current_rhs,
+            current_error, current_defect, coarse_sweeps, omega)?;
     // Ascent: prolongate each coarse error into its parent and post-smooth.
     // Parent sizes are recovered by exact doubling, and the block offsets by
     // subtracting the parent triple, so no per-level metadata is stored.
@@ -1342,32 +2077,52 @@ pub fn mac_pressure_v_cycle_2d(
     let mut ascend_ny: u64 = level_ny;
     let mut ascend_cells: u64 = level_cells;
     let mut ascend_offset: u64 = cells;
-    if (levels > 1) { ascend_offset = level_offset - level_cells - level_cells - level_cells; }
+
+    if (levels > 1) {
+        ascend_offset = level_offset - level_cells - level_cells - level_cells;
+    }
+
     let mut ascend_hx: f64 = level_hx;
     let mut ascend_hy: f64 = level_hy;
+
     while (ascend_nx < nx) {
         let parent_nx: u64 = 2 * ascend_nx;
         let parent_ny: u64 = 2 * ascend_ny;
-        let parent_cells: u64 = checked_fluid_size(checked_mul(parent_nx, parent_ny))?;
+        let parent_cells: u64 =
+            checked_fluid_size(checked_mul(parent_nx, parent_ny))?;
         let parent_hx: f64 = ascend_hx * 0.5;
         let parent_hy: f64 = ascend_hy * 0.5;
-        let coarse_error: Span<f64> = work[(ascend_offset + ascend_cells)..(ascend_offset + ascend_cells + ascend_cells)];
+        let coarse_error: Span<f64> =
+            work[(ascend_offset + ascend_cells)..(ascend_offset + ascend_cells +
+            ascend_cells)];
         let mut parent_offset: u64 = cells;
+
         if (parent_nx == nx) {
             // returning to level 0: the caller's error/rhs and the level-0
             // defect slot provide the finest buffers.
-            mac_prolongate_constant_2d(parent_nx, parent_ny, coarse_error, error, true)?;
-            pressure_jacobi_sweep_2d(parent_nx, parent_ny, parent_hx, parent_hy, homogenized,
-                                     rhs, error, work[0..cells], post_smooth, omega)?;
+            mac_prolongate_constant_2d(
+                    parent_nx, parent_ny, coarse_error, error, true)?;
+            pressure_jacobi_sweep_2d(
+                    parent_nx, parent_ny, parent_hx, parent_hy, homogenized,
+                    rhs, error, work[0..cells], post_smooth, omega)?;
         } else {
-            parent_offset = ascend_offset - parent_cells - parent_cells - parent_cells;
-            let parent_rhs: Span<f64> = work[parent_offset..(parent_offset + parent_cells)];
-            let parent_error: Span<f64> = work[(parent_offset + parent_cells)..(parent_offset + parent_cells + parent_cells)];
-            let parent_defect: Span<f64> = work[(parent_offset + parent_cells + parent_cells)..(parent_offset + parent_cells + parent_cells + parent_cells)];
-            mac_prolongate_constant_2d(parent_nx, parent_ny, coarse_error, parent_error, true)?;
-            pressure_jacobi_sweep_2d(parent_nx, parent_ny, parent_hx, parent_hy, homogenized,
-                                     parent_rhs, parent_error, parent_defect, post_smooth, omega)?;
+            parent_offset = ascend_offset - parent_cells - parent_cells -
+                parent_cells;
+            let parent_rhs: Span<f64> =
+                work[parent_offset..(parent_offset + parent_cells)];
+            let parent_error: Span<f64> =
+                work[(parent_offset + parent_cells)..(parent_offset +
+                parent_cells + parent_cells)];
+            let parent_defect: Span<f64> =
+                work[(parent_offset + parent_cells + parent_cells)..(parent_offset +
+                parent_cells + parent_cells + parent_cells)];
+            mac_prolongate_constant_2d(
+                    parent_nx, parent_ny, coarse_error, parent_error, true)?;
+            pressure_jacobi_sweep_2d(
+                    parent_nx, parent_ny, parent_hx, parent_hy, homogenized,
+                    parent_rhs, parent_error, parent_defect, post_smooth, omega)?;
         }
+
         ascend_nx = parent_nx;
         ascend_ny = parent_ny;
         ascend_cells = parent_cells;
@@ -1375,6 +2130,7 @@ pub fn mac_pressure_v_cycle_2d(
         ascend_hx = parent_hx;
         ascend_hy = parent_hy;
     }
+
     validate_finite_result(error)?;
     return Ok(levels);
 }
@@ -1391,9 +2147,11 @@ fn dot_cells(a: Span<f64>, b: Span<f64>) -> Result<f64, FluidError> {
     validate_finite(a)?;
     validate_finite(b)?;
     let mut sum: f64 = 0.0;
-    @reproducible parfor (i in 0..a.len) [reduction(+:sum)] {
+
+    @reproducible parfor (i in 0..a.len)[reduction(+: sum)] {
         sum = sum + a.ptr[i] * b.ptr[i];
     }
+
     if (!finite_f64(sum)) { return Err(NonFiniteResult); }
     return Ok(sum);
 }
@@ -1403,10 +2161,12 @@ fn dot_cells(a: Span<f64>, b: Span<f64>) -> Result<f64, FluidError> {
 fn cells_norm2(values: Span<f64>) -> Result<f64, FluidError> {
     let mut scale: f64 = 0.0;
     let mut sum_squares: f64 = 1.0;
+
     for (i in 0..values.len) {
         let value: f64 = values.ptr[i];
         if (!finite_f64(value)) { return Err(NonFiniteInput); }
         let absolute: f64 = fabs(value);
+
         if (absolute > 0.0) {
             if (scale < absolute) {
                 let ratio: f64 = scale / absolute;
@@ -1418,6 +2178,7 @@ fn cells_norm2(values: Span<f64>) -> Result<f64, FluidError> {
             }
         }
     }
+
     if (scale == 0.0) { return Ok(0.0); }
     let result: f64 = scale * sqrt(sum_squares);
     if (!finite_f64(result)) { return Err(NonFiniteResult); }
@@ -1440,11 +2201,16 @@ fn mac_pressure_inverse_diagonal_2d(
 ) -> Result<u64, FluidError> {
     mac_pressure_diagonal_2d(nx, ny, dx, dy, boundaries, inverse_diagonal)?;
     let mut ptr: *f64 = inverse_diagonal.ptr;
+
     for (i in 0..inverse_diagonal.len) {
-        if (!finite_f64(ptr[i]) || ptr[i] <= 0.0) { return Err(PressureCgBreakdown); }
+        if (!finite_f64(ptr[i]) || ptr[i] <= 0.0) {
+            return Err(PressureCgBreakdown);
+        }
+
         ptr[i] = 1.0 / ptr[i];
         if (!finite_f64(ptr[i])) { return Err(PressureCgBreakdown); }
     }
+
     return Ok(inverse_diagonal.len);
 }
 
@@ -1458,30 +2224,48 @@ fn mac_pressure_inverse_diagonal_2d(
 // Wall and periodic sets, whose compatibility is checked as usual).
 pub fn project_incompressible_mac_multigrid_2d(
     nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, density: f64,
-    boundaries: MACBoundaryConditions2D,
-    u_faces: Span<f64>, v_faces: Span<f64>, pressure: Span<f64>, pressure_scratch: Span<f64>,
-    correction: Span<f64>, divergence: Span<f64>, work: Span<f64>,
-    max_iterations: u64, tolerance: f64,
-    levels: u64, pre_smooth: u64, post_smooth: u64, coarse_sweeps: u64, omega: f64
+    boundaries: MACBoundaryConditions2D, u_faces: Span<f64>, v_faces: Span<f64>,
+    pressure: Span<f64>, pressure_scratch: Span<f64>, correction: Span<f64>,
+    divergence: Span<f64>, work: Span<f64>, max_iterations: u64, tolerance: f64,
+    levels: u64, pre_smooth: u64, post_smooth: u64, coarse_sweeps: u64,
+    omega: f64
 ) -> Result<ProjectionReport, FluidError> {
-    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) {
+        return Err(InvalidSpacing);
+    }
+
     if (!finite_f64(dt) || dt <= 0.0) { return Err(InvalidTimestep); }
     if (!finite_f64(density) || density <= 0.0) { return Err(InvalidDensity); }
-    if (!finite_f64(tolerance) || tolerance < 0.0) { return Err(InvalidTolerance); }
+
+    if (!finite_f64(tolerance) || tolerance < 0.0) {
+        return Err(InvalidTolerance);
+    }
+
     validate_boundaries(boundaries)?;
     let cells: u64 = grid_cell_count_2d(nx, ny)?;
-    if (u_faces.len != mac_u_face_count_2d(nx, ny)? || v_faces.len != mac_v_face_count_2d(nx, ny)? ||
-        pressure.len != cells || pressure_scratch.len != cells || correction.len != cells ||
+
+    if (u_faces.len != mac_u_face_count_2d(nx, ny)? || v_faces.len !=
+        mac_v_face_count_2d(nx, ny)? || pressure.len != cells ||
+        pressure_scratch.len != cells || correction.len != cells ||
         divergence.len != cells) { return Err(DimensionMismatch); }
+
     let max_levels: u64 = mac_multigrid_level_count_2d(nx, ny)?;
     if (levels == 0 || levels > max_levels) { return Err(InvalidGrid); }
-    if (pre_smooth == 0 || post_smooth == 0 || coarse_sweeps == 0) { return Err(InvalidRelaxation); }
-    if (!finite_f64(omega) || omega <= 0.0 || omega >= 2.0) { return Err(InvalidRelaxation); }
+
+    if (pre_smooth == 0 || post_smooth == 0 || coarse_sweeps == 0) {
+        return Err(InvalidRelaxation);
+    }
+
+    if (!finite_f64(omega) || omega <= 0.0 || omega >= 2.0) {
+        return Err(InvalidRelaxation);
+    }
+
     // workspace requirement for the requested level count
     let mut required: u64 = cells;
     let mut cx: u64 = nx;
     let mut cy: u64 = ny;
     let mut remaining: u64 = levels;
+
     while (remaining > 1 && cx >= 6 && cy >= 6 && cx % 2 == 0 && cy % 2 == 0) {
         cx = cx / 2;
         cy = cy / 2;
@@ -1490,33 +2274,77 @@ pub fn project_incompressible_mac_multigrid_2d(
         required = checked_fluid_size(checked_add(required, triple))?;
         remaining = remaining - 1;
     }
+
     if (work.len < required) { return Err(DimensionMismatch); }
-    validate_finite(u_faces)?; validate_finite(v_faces)?;
+    validate_finite(u_faces)?;
+    validate_finite(v_faces)?;
     mac_apply_velocity_boundaries_2d(nx, ny, boundaries, u_faces, v_faces)?;
     mac_divergence_2d(nx, ny, dx, dy, u_faces, v_faces, divergence)?;
     let initial_divergence: f64 = max_abs(divergence)?;
-    let inv_dx: f64 = 1.0 / dx; let inv_dy: f64 = 1.0 / dy;
-    if (!finite_f64(inv_dx) || !finite_f64(inv_dy)) { return Err(NonFiniteResult); }
+    let inv_dx: f64 = 1.0 / dx;
+    let inv_dy: f64 = 1.0 / dy;
+
+    if (!finite_f64(inv_dx) || !finite_f64(inv_dy)) {
+        return Err(NonFiniteResult);
+    }
+
     let rhs_scale: f64 = density / dt;
     let correction_scale: f64 = dt / density;
-    if (!finite_f64(rhs_scale) || !finite_f64(correction_scale)) { return Err(NonFiniteResult); }
-    let has_pressure_reference: bool = is_pressure_dirichlet(boundaries.left.kind) ||
-        is_pressure_dirichlet(boundaries.right.kind) || is_pressure_dirichlet(boundaries.bottom.kind) ||
+
+    if (!finite_f64(rhs_scale) || !finite_f64(correction_scale)) {
+        return Err(NonFiniteResult);
+    }
+
+    let has_pressure_reference: bool =
+        is_pressure_dirichlet(boundaries.left.kind) ||
+        is_pressure_dirichlet(boundaries.right.kind) ||
+        is_pressure_dirichlet(boundaries.bottom.kind) ||
         is_pressure_dirichlet(boundaries.top.kind);
+
     if (!has_pressure_reference) {
         let mut net_rhs: f64 = 0.0;
-        @reproducible parfor (i in 0..cells) [reduction(+:net_rhs)] { net_rhs = net_rhs + divergence.ptr[i]; }
+
+        @reproducible parfor (i in 0..cells)[reduction(+: net_rhs)] {
+            net_rhs = net_rhs + divergence.ptr[i];
+        }
+
         let mut boundary_source: f64 = 0.0;
-        if (is_neumann(boundaries.left.kind)) { boundary_source = boundary_source + boundaries.left.pressure_gradient * (ny as f64) / dx; }
-        if (is_neumann(boundaries.right.kind)) { boundary_source = boundary_source + boundaries.right.pressure_gradient * (ny as f64) / dx; }
-        if (is_neumann(boundaries.bottom.kind)) { boundary_source = boundary_source + boundaries.bottom.pressure_gradient * (nx as f64) / dy; }
-        if (is_neumann(boundaries.top.kind)) { boundary_source = boundary_source + boundaries.top.pressure_gradient * (nx as f64) / dy; }
+
+        if (is_neumann(boundaries.left.kind)) {
+            boundary_source = boundary_source +
+                boundaries.left.pressure_gradient * (ny as f64) / dx;
+        }
+
+        if (is_neumann(boundaries.right.kind)) {
+            boundary_source = boundary_source +
+                boundaries.right.pressure_gradient * (ny as f64) / dx;
+        }
+
+        if (is_neumann(boundaries.bottom.kind)) {
+            boundary_source = boundary_source +
+                boundaries.bottom.pressure_gradient * (nx as f64) / dy;
+        }
+
+        if (is_neumann(boundaries.top.kind)) {
+            boundary_source = boundary_source + boundaries.top.pressure_gradient *
+                (nx as f64) / dy;
+        }
+
         let scaled_flux: f64 = rhs_scale * net_rhs;
-        if (!finite_f64(scaled_flux) || !finite_f64(boundary_source)) { return Err(NonFiniteResult); }
+
+        if (!finite_f64(scaled_flux) || !finite_f64(boundary_source)) {
+            return Err(NonFiniteResult);
+        }
+
         let mismatch: f64 = fabs(scaled_flux - boundary_source);
         if (!finite_f64(mismatch)) { return Err(NonFiniteResult); }
-        if (mismatch > 1.0e-10 * (1.0 + fabs(scaled_flux) + fabs(boundary_source))) { return Err(IncompatibleBoundaryFlux); }
+
+        if (mismatch > 1.0e-10 *
+            (1.0 + fabs(scaled_flux) + fabs(boundary_source))) {
+            return Err(IncompatibleBoundaryFlux);
+        }
     }
+
     let mut pressure_ptr: *f64 = pressure.ptr;
     let mut scratch_ptr: *f64 = pressure_scratch.ptr;
     let mut correction_ptr: *f64 = correction.ptr;
@@ -1524,24 +2352,39 @@ pub fn project_incompressible_mac_multigrid_2d(
     let mut iterations: u64 = 0;
     let mut pressure_residual: f64 = 1.0e300;
     let mut converged: bool = false;
+
     for (cycle in 0..max_iterations) {
         // residual r = rhs - A p into pressure_scratch
-        mac_pressure_operator_apply_2d(nx, ny, dx, dy, boundaries, pressure, pressure_scratch)?;
-        parfor (i in 0..cells) { scratch_ptr[i] = rhs_scale * divergence.ptr[i] - scratch_ptr[i]; }
+        mac_pressure_operator_apply_2d(
+                nx, ny, dx, dy, boundaries, pressure, pressure_scratch)?;
+
+        parfor (i in 0..cells) {
+            scratch_ptr[i] = rhs_scale * divergence.ptr[i] - scratch_ptr[i];
+        }
+
         validate_finite_result(pressure_scratch)?;
         // one V-cycle on the homogeneous error equation from a zero correction
         parfor (i in 0..cells) { correction_ptr[i] = 0.0; }
-        mac_pressure_v_cycle_2d(nx, ny, dx, dy, boundaries, pressure_scratch, correction, work,
-                                levels, pre_smooth, post_smooth, coarse_sweeps, omega)?;
-        parfor (i in 0..cells) { pressure_ptr[i] = pressure_ptr[i] + correction_ptr[i]; }
+        mac_pressure_v_cycle_2d(
+                nx, ny, dx, dy, boundaries, pressure_scratch, correction, work,
+                levels, pre_smooth, post_smooth, coarse_sweeps, omega)?;
+
+        parfor (i in 0..cells) {
+            pressure_ptr[i] = pressure_ptr[i] + correction_ptr[i];
+        }
+
         validate_finite_result(pressure)?;
         // residual report: max |A p - rhs| (serial deterministic maximum)
-        mac_pressure_operator_apply_2d(nx, ny, dx, dy, boundaries, pressure, correction)?;
+        mac_pressure_operator_apply_2d(
+                nx, ny, dx, dy, boundaries, pressure, correction)?;
         let mut residual_max: f64 = 0.0;
+
         for (i in 0..cells) {
-            let error: f64 = fabs(correction_ptr[i] - rhs_scale * divergence.ptr[i]);
+            let error: f64 =
+                fabs(correction_ptr[i] - rhs_scale * divergence.ptr[i]);
             if (error > residual_max) { residual_max = error; }
         }
+
         if (!finite_f64(residual_max)) { return Err(NonFiniteResult); }
         iterations = cycle + 1;
         pressure_residual = residual_max;
@@ -1552,47 +2395,73 @@ pub fn project_incompressible_mac_multigrid_2d(
     // does; this block is deliberately duplicated (rather than shared through a
     // helper) so the 0.2.1-validated Jacobi projection function remains
     // byte-for-byte untouched.
-    let mut u_ptr: *f64 = u_faces.ptr; let mut v_ptr: *f64 = v_faces.ptr;
+    let mut u_ptr: *f64 = u_faces.ptr;
+    let mut v_ptr: *f64 = v_faces.ptr;
+
     parfor (row in 0..ny) {
         for (face in 1..nx) {
             let left_cell: u64 = row * nx + face - 1;
             let right_cell: u64 = row * nx + face;
             let index: u64 = row * (nx + 1) + face;
-            u_ptr[index] = u_ptr[index] - correction_scale * (pressure_ptr[right_cell] - pressure_ptr[left_cell]) / dx;
+            u_ptr[index] = u_ptr[index] - correction_scale *
+                (pressure_ptr[right_cell] - pressure_ptr[left_cell]) / dx;
         }
     }
+
     parfor (face in 1..ny) {
         for (col in 0..nx) {
             let lower_cell: u64 = (face - 1) * nx + col;
             let upper_cell: u64 = face * nx + col;
-            v_ptr[face * nx + col] = v_ptr[face * nx + col] - correction_scale * (pressure_ptr[upper_cell] - pressure_ptr[lower_cell]) / dy;
+            v_ptr[face * nx + col] = v_ptr[face * nx + col] - correction_scale *
+                (pressure_ptr[upper_cell] - pressure_ptr[lower_cell]) / dy;
         }
     }
+
     for (row in 0..ny) {
         let low_cell: u64 = row * nx;
         let high_cell: u64 = row * nx + nx - 1;
-        let low_grad: f64 = boundary_pressure_gradient(boundaries.left, pressure_ptr[low_cell], pressure_ptr[high_cell], dx, true);
-        let high_grad: f64 = boundary_pressure_gradient(boundaries.right, pressure_ptr[high_cell], pressure_ptr[low_cell], dx, false);
-        u_ptr[row * (nx + 1)] = u_ptr[row * (nx + 1)] - correction_scale * low_grad;
-        u_ptr[row * (nx + 1) + nx] = u_ptr[row * (nx + 1) + nx] - correction_scale * high_grad;
-        if (is_periodic(boundaries.left.kind)) { u_ptr[row * (nx + 1) + nx] = u_ptr[row * (nx + 1)]; }
+        let low_grad: f64 = boundary_pressure_gradient(
+                boundaries.left, pressure_ptr[low_cell],
+                pressure_ptr[high_cell], dx, true);
+        let high_grad: f64 = boundary_pressure_gradient(
+                boundaries.right, pressure_ptr[high_cell],
+                pressure_ptr[low_cell], dx, false);
+        u_ptr[row * (nx + 1)] = u_ptr[row * (nx + 1)] - correction_scale *
+            low_grad;
+        u_ptr[row * (nx + 1) + nx] = u_ptr[row * (nx + 1) + nx] -
+            correction_scale * high_grad;
+
+        if (is_periodic(boundaries.left.kind)) {
+            u_ptr[row * (nx + 1) + nx] = u_ptr[row * (nx + 1)];
+        }
     }
+
     for (col in 0..nx) {
         let low_cell: u64 = col;
         let high_cell: u64 = (ny - 1) * nx + col;
-        let low_grad: f64 = boundary_pressure_gradient(boundaries.bottom, pressure_ptr[low_cell], pressure_ptr[high_cell], dy, true);
-        let high_grad: f64 = boundary_pressure_gradient(boundaries.top, pressure_ptr[high_cell], pressure_ptr[low_cell], dy, false);
+        let low_grad: f64 = boundary_pressure_gradient(
+                boundaries.bottom, pressure_ptr[low_cell],
+                pressure_ptr[high_cell], dy, true);
+        let high_grad: f64 = boundary_pressure_gradient(
+                boundaries.top, pressure_ptr[high_cell], pressure_ptr[low_cell],
+                dy, false);
         v_ptr[col] = v_ptr[col] - correction_scale * low_grad;
-        v_ptr[ny * nx + col] = v_ptr[ny * nx + col] - correction_scale * high_grad;
-        if (is_periodic(boundaries.bottom.kind)) { v_ptr[ny * nx + col] = v_ptr[col]; }
+        v_ptr[ny * nx + col] = v_ptr[ny * nx + col] - correction_scale *
+            high_grad;
+
+        if (is_periodic(boundaries.bottom.kind)) {
+            v_ptr[ny * nx + col] = v_ptr[col];
+        }
     }
-    validate_finite_result(u_faces)?; validate_finite_result(v_faces)?;
+
+    validate_finite_result(u_faces)?;
+    validate_finite_result(v_faces)?;
     mac_divergence_2d(nx, ny, dx, dy, u_faces, v_faces, divergence)?;
     let final_divergence: f64 = max_abs(divergence)?;
     return Ok(ProjectionReport {
         iterations: iterations, pressure_residual: pressure_residual,
-        initial_divergence_max: initial_divergence, final_divergence_max: final_divergence,
-        converged: converged
+        initial_divergence_max: initial_divergence,
+        final_divergence_max: final_divergence, converged: converged
     });
 }
 
@@ -1613,46 +2482,70 @@ pub fn project_incompressible_mac_multigrid_2d(
 // same quantity project_incompressible_mac_2d reports.
 pub fn project_incompressible_mac_pcg_2d(
     nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, density: f64,
-    boundaries: MACBoundaryConditions2D,
-    u_faces: Span<f64>, v_faces: Span<f64>, pressure: Span<f64>,
-    divergence: Span<f64>, residual: Span<f64>, direction: Span<f64>, product: Span<f64>,
-    z: Span<f64>, inverse_diagonal: Span<f64>, work: Span<f64>,
-    preconditioner: PressurePreconditioner, levels: u64, pre_smooth: u64, post_smooth: u64,
-    coarse_sweeps: u64, omega: f64, max_iterations: u64, tolerance: f64
+    boundaries: MACBoundaryConditions2D, u_faces: Span<f64>, v_faces: Span<f64>,
+    pressure: Span<f64>, divergence: Span<f64>, residual: Span<f64>,
+    direction: Span<f64>, product: Span<f64>, z: Span<f64>,
+    inverse_diagonal: Span<f64>, work: Span<f64>,
+    preconditioner: PressurePreconditioner, levels: u64, pre_smooth: u64,
+    post_smooth: u64, coarse_sweeps: u64, omega: f64, max_iterations: u64,
+    tolerance: f64
 ) -> Result<ProjectionReport, FluidError> {
-    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) {
+        return Err(InvalidSpacing);
+    }
+
     if (!finite_f64(dt) || dt <= 0.0) { return Err(InvalidTimestep); }
     if (!finite_f64(density) || density <= 0.0) { return Err(InvalidDensity); }
-    if (!finite_f64(tolerance) || tolerance < 0.0) { return Err(InvalidTolerance); }
+
+    if (!finite_f64(tolerance) || tolerance < 0.0) {
+        return Err(InvalidTolerance);
+    }
+
     validate_boundaries(boundaries)?;
     let cells: u64 = grid_cell_count_2d(nx, ny)?;
-    if (u_faces.len != mac_u_face_count_2d(nx, ny)? || v_faces.len != mac_v_face_count_2d(nx, ny)? ||
-        pressure.len != cells || divergence.len != cells || residual.len != cells ||
-        direction.len != cells || product.len != cells || z.len != cells) { return Err(DimensionMismatch); }
-    let has_pressure_reference: bool = is_pressure_dirichlet(boundaries.left.kind) ||
-        is_pressure_dirichlet(boundaries.right.kind) || is_pressure_dirichlet(boundaries.bottom.kind) ||
+
+    if (u_faces.len != mac_u_face_count_2d(nx, ny)? || v_faces.len !=
+        mac_v_face_count_2d(nx, ny)? || pressure.len != cells || divergence.len !=
+        cells || residual.len != cells || direction.len != cells || product.len !=
+        cells || z.len != cells) { return Err(DimensionMismatch); }
+
+    let has_pressure_reference: bool =
+        is_pressure_dirichlet(boundaries.left.kind) ||
+        is_pressure_dirichlet(boundaries.right.kind) ||
+        is_pressure_dirichlet(boundaries.bottom.kind) ||
         is_pressure_dirichlet(boundaries.top.kind);
     if (!has_pressure_reference) { return Err(InvalidBoundarySet); }
     let mut multigrid: bool = false;
+
     match (preconditioner) {
         PressureJacobi => { multigrid = false; }
         PressureMultigrid => { multigrid = true; }
     }
+
     if (!multigrid) {
         // PressureJacobi: only the inverse-diagonal workspace is required.
         if (inverse_diagonal.len != cells) { return Err(DimensionMismatch); }
     }
+
     if (multigrid) {
         // PressureMultigrid: the level hierarchy parameters and the multigrid
         // work span are required (inverse_diagonal is left untouched).
         let max_levels: u64 = mac_multigrid_level_count_2d(nx, ny)?;
         if (levels == 0 || levels > max_levels) { return Err(InvalidGrid); }
-        if (pre_smooth == 0 || post_smooth == 0 || coarse_sweeps == 0) { return Err(InvalidRelaxation); }
-        if (!finite_f64(omega) || omega <= 0.0 || omega >= 2.0) { return Err(InvalidRelaxation); }
+
+        if (pre_smooth == 0 || post_smooth == 0 || coarse_sweeps == 0) {
+            return Err(InvalidRelaxation);
+        }
+
+        if (!finite_f64(omega) || omega <= 0.0 || omega >= 2.0) {
+            return Err(InvalidRelaxation);
+        }
+
         let mut required: u64 = cells;
         let mut cx: u64 = nx;
         let mut cy: u64 = ny;
         let mut remaining: u64 = levels;
+
         while (remaining > 1 && cx >= 6 && cy >= 6 && cx % 2 == 0 && cy % 2 == 0) {
             cx = cx / 2;
             cy = cy / 2;
@@ -1661,36 +2554,55 @@ pub fn project_incompressible_mac_pcg_2d(
             required = checked_fluid_size(checked_add(required, triple))?;
             remaining = remaining - 1;
         }
+
         if (work.len < required) { return Err(DimensionMismatch); }
     }
-    validate_finite(u_faces)?; validate_finite(v_faces)?;
+
+    validate_finite(u_faces)?;
+    validate_finite(v_faces)?;
     mac_apply_velocity_boundaries_2d(nx, ny, boundaries, u_faces, v_faces)?;
     mac_divergence_2d(nx, ny, dx, dy, u_faces, v_faces, divergence)?;
     let initial_divergence: f64 = max_abs(divergence)?;
     let rhs_scale: f64 = density / dt;
     let correction_scale: f64 = dt / density;
-    if (!finite_f64(rhs_scale) || !finite_f64(correction_scale)) { return Err(NonFiniteResult); }
+
+    if (!finite_f64(rhs_scale) || !finite_f64(correction_scale)) {
+        return Err(NonFiniteResult);
+    }
+
     let mut pressure_ptr: *f64 = pressure.ptr;
     let mut residual_ptr: *f64 = residual.ptr;
     let mut direction_ptr: *f64 = direction.ptr;
     let mut product_ptr: *f64 = product.ptr;
     let mut z_ptr: *f64 = z.ptr;
     for (i in 0..cells) { pressure_ptr[i] = 0.0; }
+
     // CG on L = -A with b = -rhs: L p = -rhs is equivalent to A p = rhs.
     // product holds the negated right-hand side during initialisation.
-    parfor (i in 0..cells) { product_ptr[i] = 0.0 - rhs_scale * divergence.ptr[i]; }
+    parfor (i in 0..cells) {
+        product_ptr[i] = 0.0 - rhs_scale * divergence.ptr[i];
+    }
+
     // residual r = b - L p = b (p starts at zero)
     parfor (i in 0..cells) { residual_ptr[i] = product_ptr[i]; }
     validate_finite_result(residual)?;
+
     if (multigrid) {
         parfor (i in 0..cells) { z_ptr[i] = 0.0; }
-        mac_pressure_v_cycle_2d(nx, ny, dx, dy, boundaries, residual, z, work,
-                                levels, pre_smooth, post_smooth, coarse_sweeps, omega)?;
+        mac_pressure_v_cycle_2d(
+                nx, ny, dx, dy, boundaries, residual, z, work, levels,
+                pre_smooth, post_smooth, coarse_sweeps, omega)?;
     } else {
-        mac_pressure_inverse_diagonal_2d(nx, ny, dx, dy, boundaries, inverse_diagonal)?;
-        parfor (i in 0..cells) { z_ptr[i] = inverse_diagonal.ptr[i] * residual_ptr[i]; }
+        mac_pressure_inverse_diagonal_2d(
+                nx, ny, dx, dy, boundaries, inverse_diagonal)?;
+
+        parfor (i in 0..cells) {
+            z_ptr[i] = inverse_diagonal.ptr[i] * residual_ptr[i];
+        }
+
         validate_finite_result(z)?;
     }
+
     let mut rz: f64 = dot_cells(residual, z)?;
     if (rz <= 0.0) { return Err(PressureCgBreakdown); }
     parfor (i in 0..cells) { direction_ptr[i] = z_ptr[i]; }
@@ -1698,92 +2610,136 @@ pub fn project_incompressible_mac_pcg_2d(
     let mut converged: bool = false;
     let mut residual_norm: f64 = cells_norm2(residual)?;
     if (residual_norm <= tolerance) { converged = true; }
+
     while (!converged && iterations < max_iterations) {
         // product = L * direction = -(A * direction)
-        mac_pressure_operator_apply_2d(nx, ny, dx, dy, boundaries, direction, product)?;
+        mac_pressure_operator_apply_2d(
+                nx, ny, dx, dy, boundaries, direction, product)?;
         negate_cells(product)?;
         let denominator: f64 = dot_cells(direction, product)?;
         if (denominator <= 0.0) { return Err(PressureCgBreakdown); }
         let alpha: f64 = rz / denominator;
         if (!finite_f64(alpha)) { return Err(NonFiniteResult); }
+
         parfor (i in 0..cells) {
             pressure_ptr[i] = pressure_ptr[i] + alpha * direction_ptr[i];
             residual_ptr[i] = residual_ptr[i] - alpha * product_ptr[i];
         }
+
         validate_finite_result(pressure)?;
         validate_finite_result(residual)?;
         iterations = iterations + 1;
         residual_norm = cells_norm2(residual)?;
         if (residual_norm <= tolerance) { converged = true; break; }
+
         if (multigrid) {
             parfor (i in 0..cells) { z_ptr[i] = 0.0; }
-            mac_pressure_v_cycle_2d(nx, ny, dx, dy, boundaries, residual, z, work,
-                                    levels, pre_smooth, post_smooth, coarse_sweeps, omega)?;
+            mac_pressure_v_cycle_2d(
+                    nx, ny, dx, dy, boundaries, residual, z, work, levels,
+                    pre_smooth, post_smooth, coarse_sweeps, omega)?;
         } else {
-            parfor (i in 0..cells) { z_ptr[i] = inverse_diagonal.ptr[i] * residual_ptr[i]; }
+            parfor (i in 0..cells) {
+                z_ptr[i] = inverse_diagonal.ptr[i] * residual_ptr[i];
+            }
+
             validate_finite_result(z)?;
         }
+
         let next_rz: f64 = dot_cells(residual, z)?;
         if (next_rz <= 0.0) { return Err(PressureCgBreakdown); }
         if (rz == 0.0) { return Err(PressureCgBreakdown); }
         let beta: f64 = next_rz / rz;
         if (!finite_f64(beta)) { return Err(NonFiniteResult); }
-        parfor (i in 0..cells) { direction_ptr[i] = z_ptr[i] + beta * direction_ptr[i]; }
+
+        parfor (i in 0..cells) {
+            direction_ptr[i] = z_ptr[i] + beta * direction_ptr[i];
+        }
+
         rz = next_rz;
     }
+
     // pressure_residual reports the same A-form max-norm as the other
     // projections: max |A p - rhs| (serial deterministic maximum).
-    mac_pressure_operator_apply_2d(nx, ny, dx, dy, boundaries, pressure, product)?;
+    mac_pressure_operator_apply_2d(
+            nx, ny, dx, dy, boundaries, pressure, product)?;
     let mut pressure_residual: f64 = 0.0;
+
     for (i in 0..cells) {
         let error: f64 = fabs(product_ptr[i] - rhs_scale * divergence.ptr[i]);
         if (error > pressure_residual) { pressure_residual = error; }
     }
+
     if (!finite_f64(pressure_residual)) { return Err(NonFiniteResult); }
 
     // Correct internal face velocities exactly as project_incompressible_mac_2d
     // does; duplicated (not shared) so the 0.2.1-validated projection stays
     // byte-for-byte untouched.
-    let mut u_ptr: *f64 = u_faces.ptr; let mut v_ptr: *f64 = v_faces.ptr;
+    let mut u_ptr: *f64 = u_faces.ptr;
+    let mut v_ptr: *f64 = v_faces.ptr;
+
     parfor (row in 0..ny) {
         for (face in 1..nx) {
             let left_cell: u64 = row * nx + face - 1;
             let right_cell: u64 = row * nx + face;
             let index: u64 = row * (nx + 1) + face;
-            u_ptr[index] = u_ptr[index] - correction_scale * (pressure_ptr[right_cell] - pressure_ptr[left_cell]) / dx;
+            u_ptr[index] = u_ptr[index] - correction_scale *
+                (pressure_ptr[right_cell] - pressure_ptr[left_cell]) / dx;
         }
     }
+
     parfor (face in 1..ny) {
         for (col in 0..nx) {
             let lower_cell: u64 = (face - 1) * nx + col;
             let upper_cell: u64 = face * nx + col;
-            v_ptr[face * nx + col] = v_ptr[face * nx + col] - correction_scale * (pressure_ptr[upper_cell] - pressure_ptr[lower_cell]) / dy;
+            v_ptr[face * nx + col] = v_ptr[face * nx + col] - correction_scale *
+                (pressure_ptr[upper_cell] - pressure_ptr[lower_cell]) / dy;
         }
     }
+
     for (row in 0..ny) {
         let low_cell: u64 = row * nx;
         let high_cell: u64 = row * nx + nx - 1;
-        let low_grad: f64 = boundary_pressure_gradient(boundaries.left, pressure_ptr[low_cell], pressure_ptr[high_cell], dx, true);
-        let high_grad: f64 = boundary_pressure_gradient(boundaries.right, pressure_ptr[high_cell], pressure_ptr[low_cell], dx, false);
-        u_ptr[row * (nx + 1)] = u_ptr[row * (nx + 1)] - correction_scale * low_grad;
-        u_ptr[row * (nx + 1) + nx] = u_ptr[row * (nx + 1) + nx] - correction_scale * high_grad;
-        if (is_periodic(boundaries.left.kind)) { u_ptr[row * (nx + 1) + nx] = u_ptr[row * (nx + 1)]; }
+        let low_grad: f64 = boundary_pressure_gradient(
+                boundaries.left, pressure_ptr[low_cell],
+                pressure_ptr[high_cell], dx, true);
+        let high_grad: f64 = boundary_pressure_gradient(
+                boundaries.right, pressure_ptr[high_cell],
+                pressure_ptr[low_cell], dx, false);
+        u_ptr[row * (nx + 1)] = u_ptr[row * (nx + 1)] - correction_scale *
+            low_grad;
+        u_ptr[row * (nx + 1) + nx] = u_ptr[row * (nx + 1) + nx] -
+            correction_scale * high_grad;
+
+        if (is_periodic(boundaries.left.kind)) {
+            u_ptr[row * (nx + 1) + nx] = u_ptr[row * (nx + 1)];
+        }
     }
+
     for (col in 0..nx) {
         let low_cell: u64 = col;
         let high_cell: u64 = (ny - 1) * nx + col;
-        let low_grad: f64 = boundary_pressure_gradient(boundaries.bottom, pressure_ptr[low_cell], pressure_ptr[high_cell], dy, true);
-        let high_grad: f64 = boundary_pressure_gradient(boundaries.top, pressure_ptr[high_cell], pressure_ptr[low_cell], dy, false);
+        let low_grad: f64 = boundary_pressure_gradient(
+                boundaries.bottom, pressure_ptr[low_cell],
+                pressure_ptr[high_cell], dy, true);
+        let high_grad: f64 = boundary_pressure_gradient(
+                boundaries.top, pressure_ptr[high_cell], pressure_ptr[low_cell],
+                dy, false);
         v_ptr[col] = v_ptr[col] - correction_scale * low_grad;
-        v_ptr[ny * nx + col] = v_ptr[ny * nx + col] - correction_scale * high_grad;
-        if (is_periodic(boundaries.bottom.kind)) { v_ptr[ny * nx + col] = v_ptr[col]; }
+        v_ptr[ny * nx + col] = v_ptr[ny * nx + col] - correction_scale *
+            high_grad;
+
+        if (is_periodic(boundaries.bottom.kind)) {
+            v_ptr[ny * nx + col] = v_ptr[col];
+        }
     }
-    validate_finite_result(u_faces)?; validate_finite_result(v_faces)?;
+
+    validate_finite_result(u_faces)?;
+    validate_finite_result(v_faces)?;
     mac_divergence_2d(nx, ny, dx, dy, u_faces, v_faces, divergence)?;
     let final_divergence: f64 = max_abs(divergence)?;
     return Ok(ProjectionReport {
         iterations: iterations, pressure_residual: pressure_residual,
-        initial_divergence_max: initial_divergence, final_divergence_max: final_divergence,
-        converged: converged
+        initial_divergence_max: initial_divergence,
+        final_divergence_max: final_divergence, converged: converged
     });
 }

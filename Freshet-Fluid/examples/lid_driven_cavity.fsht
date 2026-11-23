@@ -15,61 +15,101 @@ fn main() {
     let pressure: *f64 = malloc(f64, cells);
     let pressure_scratch: *f64 = malloc(f64, cells);
     let divergence: *f64 = malloc(f64, cells);
-    defer free(u); defer free(v); defer free(u_star); defer free(v_star);
-    defer free(pressure); defer free(pressure_scratch); defer free(divergence);
+    defer free(u);
+    defer free(v);
+    defer free(u_star);
+    defer free(v_star);
+    defer free(pressure);
+    defer free(pressure_scratch);
+    defer free(divergence);
     for (i in 0..u_count) { u[i] = 0.0; u_star[i] = 0.0; }
     for (i in 0..v_count) { v[i] = 0.0; v_star[i] = 0.0; }
-    for (i in 0..cells) { pressure[i] = 0.0; pressure_scratch[i] = 0.0; divergence[i] = 0.0; }
+
+    for (i in 0..cells) {
+        pressure[i] = 0.0;
+        pressure_scratch[i] = 0.0;
+        divergence[i] = 0.0;
+    }
 
     let boundaries: MACBoundaryConditions2D = MACBoundaryConditions2D {
-        left: BoundaryCondition2D { kind: Wall, normal_velocity: 0.0, tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0 },
-        right: BoundaryCondition2D { kind: Wall, normal_velocity: 0.0, tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0 },
-        bottom: BoundaryCondition2D { kind: Wall, normal_velocity: 0.0, tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0 },
-        top: BoundaryCondition2D { kind: Wall, normal_velocity: 0.0, tangential_velocity: 1.0, pressure_value: 0.0, pressure_gradient: 0.0 }
+        left: BoundaryCondition2D { kind: Wall, normal_velocity: 0.0, tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0},
+        right: BoundaryCondition2D { kind: Wall, normal_velocity: 0.0, tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0},
+        bottom: BoundaryCondition2D { kind: Wall, normal_velocity: 0.0, tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0},
+        top: BoundaryCondition2D { kind: Wall, normal_velocity: 0.0, tangential_velocity: 1.0, pressure_value: 0.0, pressure_gradient: 0.0}
     };
+
     let dx: f64 = 1.0 / (nx as f64);
     let dy: f64 = 1.0 / (ny as f64);
     let density: f64 = 1.0;
     let viscosity: f64 = 0.01;
     // U=1, L=1 and nu=0.01 gives the conventional Re=100 cavity case.
-    print("Reynolds number="); print_f64(1.0 / viscosity, 1); println();
+    print("Reynolds number=");
+    print_f64(1.0 / viscosity, 1);
+    println();
     let mut last_divergence: f64 = 0.0;
     let mut step_index: u64 = 0;
+
     while (step_index < 500) {
         let stable: Result<f64, FluidError> = mac_stable_timestep_2d(
-            nx, ny, dx, dy, viscosity, 0.4, span(u, u_count), span(v, v_count));
+                nx, ny, dx, dy, viscosity, 0.4, span(u, u_count),
+                span(v, v_count));
         let mut dt: f64 = 0.001;
+
         match (stable) {
-            Ok(value) => { dt = value; if (dt > 0.001) { dt = 0.001; } }
+            Ok(value) => {
+                dt = value;
+                if (dt > 0.001) { dt = 0.001; }
+            }
+
             Err(error) => { print("timestep error"); println(); return; }
         }
+
         let result: Result<ProjectionReport, FluidError> = cavity_step_2d(
-            nx, ny, dx, dy, dt, density, viscosity, boundaries,
-            span(u, u_count), span(v, v_count), span(u_star, u_count), span(v_star, v_count),
-            span(pressure, cells), span(pressure_scratch, cells), span(divergence, cells),
-            400, 1.0e-7);
+                nx, ny, dx, dy, dt, density, viscosity, boundaries,
+                span(u, u_count), span(v, v_count), span(u_star, u_count),
+                span(v_star, v_count), span(pressure, cells),
+                span(pressure_scratch, cells), span(divergence, cells), 400,
+                1.0e-7);
+
         match (result) {
             Ok(report) => { last_divergence = report.final_divergence_max; }
             Err(error) => { print("projection error"); println(); return; }
         }
+
         if (step_index % 50 == 0) {
-            print("step_index="); print_u64(step_index);
-            print(" divergence="); print_f64(last_divergence, 10); println();
+            print("step_index=");
+            print_u64(step_index);
+            print(" divergence=");
+            print_f64(last_divergence, 10);
+            println();
         }
+
         step_index = step_index + 1;
     }
-    print("final max divergence="); print_f64(last_divergence, 12); println();
+
+    print("final max divergence=");
+    print_f64(last_divergence, 12);
+    println();
     // Report the two centreline profiles as reproducible benchmark observables.
     let centre_face: u64 = nx / 2;
     let centre_row: u64 = ny / 2;
-    print("u(x=0.5,y):"); println();
+    print("u(x=0.5,y):");
+    println();
+
     for (row in 0..ny) {
-        print_f64((row as f64 + 0.5) * dy, 6); print(" ");
-        print_f64(u[row * (nx + 1) + centre_face], 10); println();
+        print_f64((row as f64 + 0.5) * dy, 6);
+        print(" ");
+        print_f64(u[row * (nx + 1) + centre_face], 10);
+        println();
     }
-    print("v(x,y=0.5):"); println();
+
+    print("v(x,y=0.5):");
+    println();
+
     for (col in 0..nx) {
-        print_f64((col as f64 + 0.5) * dx, 6); print(" ");
-        print_f64(v[centre_row * nx + col], 10); println();
+        print_f64((col as f64 + 0.5) * dx, 6);
+        print(" ");
+        print_f64(v[centre_row * nx + col], 10);
+        println();
     }
 }

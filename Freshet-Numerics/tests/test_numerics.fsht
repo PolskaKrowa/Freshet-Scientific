@@ -1,9 +1,12 @@
 import freshet_numerics;
 
 @test fn dot_is_correct_and_reproducible() {
-    let a: [f64; 4] = [1.0, 2.0, 3.0, 4.0];
-    let b: [f64; 4] = [4.0, 3.0, 2.0, 1.0];
+    let a: [f64;
+    4] = [1.0, 2.0, 3.0, 4.0];
+    let b: [f64;
+    4] = [4.0, 3.0, 2.0, 1.0];
     let result: Result<f64, NumericsError> = dot_f64(span(a), span(b));
+
     match (result) {
         Ok(value) => { assert(fabs(value - 20.0) < 1.0e-12); }
         Err(error) => { assert(false); }
@@ -11,14 +14,18 @@ import freshet_numerics;
 }
 
 @test fn stable_norm_handles_large_and_small_values() {
-    let large: [f64; 2] = [1.0e308, 1.0e308];
-    let small: [f64; 2] = [1.0e-308, 1.0e-308];
+    let large: [f64;
+    2] = [1.0e308, 1.0e308];
+    let small: [f64;
+    2] = [1.0e-308, 1.0e-308];
     let large_norm: Result<f64, NumericsError> = norm2_f64(span(large));
     let small_norm: Result<f64, NumericsError> = norm2_f64(span(small));
+
     match (large_norm) {
         Ok(value) => { assert(value > 1.4e308 && value < 1.42e308); }
         Err(error) => { assert(false); }
     }
+
     match (small_norm) {
         Ok(value) => { assert(value > 1.4e-308 && value < 1.42e-308); }
         Err(error) => { assert(false); }
@@ -26,25 +33,55 @@ import freshet_numerics;
 }
 
 @test fn vector_primitives_are_correct() {
-    let x: [f64; 3] = [3.0, 4.0, 0.0];
-    let mut y: [f64; 3] = [0.0, 0.0, 0.0];
+    let x: [f64;
+    3] = [3.0, 4.0, 0.0];
+    let mut y: [f64;
+    3] = [0.0, 0.0, 0.0];
     let scaled: Result<u64, NumericsError> = scale_f64(2.0, span(x), span(y));
-    match (scaled) { Ok(n) => { assert(n == 3); } Err(error) => { assert(false); } }
+
+    match (scaled) {
+        Ok(n) => { assert(n == 3); }
+        Err(error) => { assert(false); }
+    }
+
     assert(y[0] == 6.0 && y[1] == 8.0 && y[2] == 0.0);
     let norm: Result<f64, NumericsError> = norm2_f64(span(x));
-    match (norm) { Ok(value) => { assert(fabs(value - 5.0) < 1.0e-12); } Err(error) => { assert(false); } }
+
+    match (norm) {
+        Ok(value) => { assert(fabs(value - 5.0) < 1.0e-12); }
+        Err(error) => { assert(false); }
+    }
+
     let total: Result<f64, NumericsError> = sum_f64(span(x));
-    match (total) { Ok(value) => { assert(value == 7.0); } Err(error) => { assert(false); } }
+
+    match (total) {
+        Ok(value) => { assert(value == 7.0); }
+        Err(error) => { assert(false); }
+    }
+
     let maximum: Result<f64, NumericsError> = max_f64(span(x));
-    match (maximum) { Ok(value) => { assert(value == 4.0); } Err(error) => { assert(false); } }
+
+    match (maximum) {
+        Ok(value) => { assert(value == 4.0); }
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn dense_matrix_product_writes_row_major_output() {
-    let a: [f64; 4] = [1.0, 2.0, 3.0, 4.0];
-    let b: [f64; 4] = [5.0, 6.0, 7.0, 8.0];
-    let mut c: [f64; 4] = [0.0, 0.0, 0.0, 0.0];
-    let result: Result<u64, NumericsError> = blocked_matmul_f64(2, 2, 2, 1, span(a), span(b), span(c));
-    match (result) { Ok(count) => { assert(count == 4); } Err(error) => { assert(false); } }
+    let a: [f64;
+    4] = [1.0, 2.0, 3.0, 4.0];
+    let b: [f64;
+    4] = [5.0, 6.0, 7.0, 8.0];
+    let mut c: [f64;
+    4] = [0.0, 0.0, 0.0, 0.0];
+    let result: Result<u64, NumericsError> = blocked_matmul_f64(
+            2, 2, 2, 1, span(a), span(b), span(c));
+
+    match (result) {
+        Ok(count) => { assert(count == 4); }
+        Err(error) => { assert(false); }
+    }
+
     assert(fabs(c[0] - 19.0) < 1.0e-12);
     assert(fabs(c[1] - 22.0) < 1.0e-12);
     assert(fabs(c[2] - 43.0) < 1.0e-12);
@@ -52,44 +89,80 @@ import freshet_numerics;
 }
 
 @test fn conjugate_gradient_solves_spd_system() {
-    let a: [f64; 4] = [4.0, 1.0, 1.0, 3.0];
-    let b: [f64; 2] = [1.0, 2.0];
-    let mut x: [f64; 2] = [0.0, 0.0];
-    let mut r: [f64; 2] = [0.0, 0.0];
-    let mut p: [f64; 2] = [0.0, 0.0];
-    let mut ap: [f64; 2] = [0.0, 0.0];
+    let a: [f64;
+    4] = [4.0, 1.0, 1.0, 3.0];
+    let b: [f64;
+    2] = [1.0, 2.0];
+    let mut x: [f64;
+    2] = [0.0, 0.0];
+    let mut r: [f64;
+    2] = [0.0, 0.0];
+    let mut p: [f64;
+    2] = [0.0, 0.0];
+    let mut ap: [f64;
+    2] = [0.0, 0.0];
     let result: Result<CGReport, NumericsError> = conjugate_gradient_f64(
-        2, span(a), span(b), span(x), span(r), span(p), span(ap), 20, 1.0e-12);
-    match (result) { Ok(report) => { assert(report.converged); } Err(error) => { assert(false); } }
+            2, span(a), span(b), span(x), span(r), span(p), span(ap), 20,
+            1.0e-12);
+
+    match (result) {
+        Ok(report) => { assert(report.converged); }
+        Err(error) => { assert(false); }
+    }
+
     assert(fabs(x[0] - (1.0 / 11.0)) < 1.0e-10);
     assert(fabs(x[1] - (7.0 / 11.0)) < 1.0e-10);
 }
 
 @test fn coo_assembly_and_csr_matvec_are_correct() {
-    let rows: [u64; 4] = [0, 0, 1, 1];
-    let cols: [u64; 4] = [0, 1, 0, 1];
-    let values: [f64; 4] = [4.0, 1.0, 1.0, 3.0];
-    let mut offsets: [u64; 3] = [0, 0, 0];
-    let mut csr_cols: [u64; 4] = [0, 0, 0, 0];
-    let mut csr_values: [f64; 4] = [0.0, 0.0, 0.0, 0.0];
-    let mut cursor: [u64; 2] = [0, 0];
+    let rows: [u64;
+    4] = [0, 0, 1, 1];
+    let cols: [u64;
+    4] = [0, 1, 0, 1];
+    let values: [f64;
+    4] = [4.0, 1.0, 1.0, 3.0];
+    let mut offsets: [u64;
+    3] = [0, 0, 0];
+    let mut csr_cols: [u64;
+    4] = [0, 0, 0, 0];
+    let mut csr_values: [f64;
+    4] = [0.0, 0.0, 0.0, 0.0];
+    let mut cursor: [u64;
+    2] = [0, 0];
     let assembled: Result<u64, NumericsError> = coo_to_csr_f64(
-        2, 2, span(rows), span(cols), span(values), span(offsets), span(csr_cols), span(csr_values), span(cursor));
-    match (assembled) { Ok(nnz) => { assert(nnz == 4); } Err(error) => { assert(false); } }
+            2, 2, span(rows), span(cols), span(values), span(offsets),
+            span(csr_cols), span(csr_values), span(cursor));
+
+    match (assembled) {
+        Ok(nnz) => { assert(nnz == 4); }
+        Err(error) => { assert(false); }
+    }
+
     let matrix: CSRMatrixF64 = CSRMatrixF64 {
         rows: 2, cols: 2, nnz: 4, row_offsets: span(offsets),
         col_indices: span(csr_cols), values: span(csr_values)
     };
-    let x: [f64; 2] = [1.0, 2.0];
-    let mut y: [f64; 2] = [0.0, 0.0];
-    let product: Result<u64, NumericsError> = csr_matvec_f64(matrix, span(x), span(y));
-    match (product) { Ok(n) => { assert(n == 2); } Err(error) => { assert(false); } }
+
+    let x: [f64;
+    2] = [1.0, 2.0];
+    let mut y: [f64;
+    2] = [0.0, 0.0];
+    let product: Result<u64, NumericsError> = csr_matvec_f64(
+            matrix, span(x), span(y));
+
+    match (product) {
+        Ok(n) => { assert(n == 2); }
+        Err(error) => { assert(false); }
+    }
+
     assert(y[0] == 6.0 && y[1] == 7.0);
 }
 
 @test fn stable_norm_reports_true_result_overflow() {
-    let values: [f64; 2] = [1.7e308, 1.7e308];
+    let values: [f64;
+    2] = [1.7e308, 1.7e308];
     let result: Result<f64, NumericsError> = norm2_f64(span(values));
+
     match (result) {
         Ok(value) => { assert(false); }
         Err(NonFiniteResult) => { assert(true); }
@@ -100,38 +173,82 @@ import freshet_numerics;
 @test fn finite_validation_rejects_nonfinite_inputs_and_overflow() {
     let huge: f64 = 1.0e308 * 1.0e308;
     let not_a_number: f64 = huge - huge;
-    let values: [f64; 2] = [1.0, not_a_number];
-    let invalid: Result<f64, NumericsError> = dot_f64(span(values), span(values));
-    match (invalid) { Ok(value) => { assert(false); } Err(NonFiniteInput) => { assert(true); } Err(error) => { assert(false); } }
-    let a: [f64; 1] = [1.0e308];
-    let b: [f64; 1] = [1.0e308];
+    let values: [f64;
+    2] = [1.0, not_a_number];
+    let invalid: Result<f64, NumericsError> = dot_f64(
+            span(values), span(values));
+
+    match (invalid) {
+        Ok(value) => { assert(false); }
+        Err(NonFiniteInput) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+
+    let a: [f64;
+    1] = [1.0e308];
+    let b: [f64;
+    1] = [1.0e308];
     let overflow: Result<f64, NumericsError> = dot_f64(span(a), span(b));
-    match (overflow) { Ok(value) => { assert(false); } Err(NonFiniteResult) => { assert(true); } Err(error) => { assert(false); } }
+
+    match (overflow) {
+        Ok(value) => { assert(false); }
+        Err(NonFiniteResult) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn matrix_free_cg_uses_the_linear_operator_trait() {
-    let matrix_values: [f64; 4] = [4.0, 1.0, 1.0, 3.0];
-    let a: DenseMatrixF64 = DenseMatrixF64 { rows: 2, cols: 2, values: span(matrix_values) };
-    let b: [f64; 2] = [1.0, 2.0];
-    let mut x: [f64; 2] = [0.0, 0.0];
-    let mut r: [f64; 2] = [0.0, 0.0];
-    let mut p: [f64; 2] = [0.0, 0.0];
-    let mut ap: [f64; 2] = [0.0, 0.0];
-    let result: Result<CGReport, NumericsError> = conjugate_gradient_operator_f64(
-        a, 2, span(b), span(x), span(r), span(p), span(ap), 20, 1.0e-12);
-    match (result) { Ok(report) => { assert(report.converged); } Err(error) => { assert(false); } }
+    let matrix_values: [f64;
+    4] = [4.0, 1.0, 1.0, 3.0];
+
+    let a: DenseMatrixF64 = DenseMatrixF64 {
+        rows: 2, cols: 2, values: span(matrix_values)
+    };
+
+    let b: [f64;
+    2] = [1.0, 2.0];
+    let mut x: [f64;
+    2] = [0.0, 0.0];
+    let mut r: [f64;
+    2] = [0.0, 0.0];
+    let mut p: [f64;
+    2] = [0.0, 0.0];
+    let mut ap: [f64;
+    2] = [0.0, 0.0];
+    let result: Result<CGReport, NumericsError> =
+        conjugate_gradient_operator_f64(
+            a, 2, span(b), span(x), span(r), span(p), span(ap), 20, 1.0e-12);
+
+    match (result) {
+        Ok(report) => { assert(report.converged); }
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn conjugate_gradient_rejects_nan_tolerance() {
-    let matrix_values: [f64; 1] = [1.0];
-    let b: [f64; 1] = [1.0];
-    let mut x: [f64; 1] = [0.0]; let mut r: [f64; 1] = [0.0];
-    let mut p: [f64; 1] = [0.0]; let mut ap: [f64; 1] = [0.0];
+    let matrix_values: [f64;
+    1] = [1.0];
+    let b: [f64;
+    1] = [1.0];
+    let mut x: [f64;
+    1] = [0.0];
+    let mut r: [f64;
+    1] = [0.0];
+    let mut p: [f64;
+    1] = [0.0];
+    let mut ap: [f64;
+    1] = [0.0];
     let infinity: f64 = 1.0e308 * 1.0e308;
     let nan: f64 = infinity - infinity;
-    let a: DenseMatrixF64 = DenseMatrixF64 { rows: 1, cols: 1, values: span(matrix_values) };
-    let invalid_tolerance: Result<CGReport, NumericsError> = conjugate_gradient_operator_f64(
-        a, 1, span(b), span(x), span(r), span(p), span(ap), 4, nan);
+
+    let a: DenseMatrixF64 = DenseMatrixF64 {
+        rows: 1, cols: 1, values: span(matrix_values)
+    };
+
+    let invalid_tolerance: Result<CGReport, NumericsError> =
+        conjugate_gradient_operator_f64(
+            a, 1, span(b), span(x), span(r), span(p), span(ap), 4, nan);
+
     match (invalid_tolerance) {
         Ok(report) => { assert(false); }
         Err(InvalidTolerance) => { assert(true); }
@@ -140,78 +257,191 @@ import freshet_numerics;
 }
 
 @test fn preconditioned_cg_uses_jacobi_and_converges() {
-    let matrix_values: [f64; 4] = [4.0, 1.0, 1.0, 3.0];
-    let diagonal: [f64; 2] = [4.0, 3.0];
-    let mut inverse: [f64; 2] = [0.0, 0.0];
-    let inverse_result: Result<u64, NumericsError> = diagonal_inverse_f64(span(diagonal), span(inverse));
-    match (inverse_result) { Ok(n) => { assert(n == 2); } Err(error) => { assert(false); } }
-    let matrix: DenseMatrixF64 = DenseMatrixF64 { rows: 2, cols: 2, values: span(matrix_values) };
-    let preconditioner: JacobiPreconditionerF64 = JacobiPreconditionerF64 { inverse_diagonal: span(inverse) };
-    let b: [f64; 2] = [1.0, 2.0];
-    let mut x: [f64; 2] = [0.0, 0.0]; let mut r: [f64; 2] = [0.0, 0.0];
-    let mut z: [f64; 2] = [0.0, 0.0]; let mut p: [f64; 2] = [0.0, 0.0]; let mut ap: [f64; 2] = [0.0, 0.0];
-    let solved: Result<CGReport, NumericsError> = preconditioned_conjugate_gradient_f64(
-        matrix, preconditioner, 2, span(b), span(x), span(r), span(z), span(p), span(ap), 20, 1.0e-12);
-    match (solved) { Ok(report) => { assert(report.converged); } Err(error) => { assert(false); } }
-    assert(fabs(x[0] - 1.0 / 11.0) < 1.0e-10 && fabs(x[1] - 7.0 / 11.0) < 1.0e-10);
+    let matrix_values: [f64;
+    4] = [4.0, 1.0, 1.0, 3.0];
+    let diagonal: [f64;
+    2] = [4.0, 3.0];
+    let mut inverse: [f64;
+    2] = [0.0, 0.0];
+    let inverse_result: Result<u64, NumericsError> = diagonal_inverse_f64(
+            span(diagonal), span(inverse));
+
+    match (inverse_result) {
+        Ok(n) => { assert(n == 2); }
+        Err(error) => { assert(false); }
+    }
+
+    let matrix: DenseMatrixF64 = DenseMatrixF64 {
+        rows: 2, cols: 2, values: span(matrix_values)
+    };
+
+    let preconditioner: JacobiPreconditionerF64 = JacobiPreconditionerF64 {
+        inverse_diagonal: span(inverse)
+    };
+
+    let b: [f64;
+    2] = [1.0, 2.0];
+    let mut x: [f64;
+    2] = [0.0, 0.0];
+    let mut r: [f64;
+    2] = [0.0, 0.0];
+    let mut z: [f64;
+    2] = [0.0, 0.0];
+    let mut p: [f64;
+    2] = [0.0, 0.0];
+    let mut ap: [f64;
+    2] = [0.0, 0.0];
+    let solved: Result<CGReport, NumericsError> =
+        preconditioned_conjugate_gradient_f64(
+            matrix, preconditioner, 2, span(b), span(x), span(r), span(z),
+            span(p), span(ap), 20, 1.0e-12);
+
+    match (solved) {
+        Ok(report) => { assert(report.converged); }
+        Err(error) => { assert(false); }
+    }
+
+    assert(fabs(x[0] - 1.0 / 11.0) < 1.0e-10 &&
+        fabs(x[1] - 7.0 / 11.0) < 1.0e-10);
 }
 
 @test fn bicgstab_solves_nonsymmetric_system() {
-    let matrix_values: [f64; 4] = [4.0, 1.0, 2.0, 3.0];
-    let matrix: DenseMatrixF64 = DenseMatrixF64 { rows: 2, cols: 2, values: span(matrix_values) };
-    let b: [f64; 2] = [1.0, 2.0];
-    let mut x: [f64; 2] = [0.0, 0.0]; let mut r: [f64; 2] = [0.0, 0.0];
-    let mut rh: [f64; 2] = [0.0, 0.0]; let mut p: [f64; 2] = [0.0, 0.0];
-    let mut v: [f64; 2] = [0.0, 0.0]; let mut s: [f64; 2] = [0.0, 0.0]; let mut t: [f64; 2] = [0.0, 0.0];
+    let matrix_values: [f64;
+    4] = [4.0, 1.0, 2.0, 3.0];
+
+    let matrix: DenseMatrixF64 = DenseMatrixF64 {
+        rows: 2, cols: 2, values: span(matrix_values)
+    };
+
+    let b: [f64;
+    2] = [1.0, 2.0];
+    let mut x: [f64;
+    2] = [0.0, 0.0];
+    let mut r: [f64;
+    2] = [0.0, 0.0];
+    let mut rh: [f64;
+    2] = [0.0, 0.0];
+    let mut p: [f64;
+    2] = [0.0, 0.0];
+    let mut v: [f64;
+    2] = [0.0, 0.0];
+    let mut s: [f64;
+    2] = [0.0, 0.0];
+    let mut t: [f64;
+    2] = [0.0, 0.0];
     let solved: Result<KrylovReport, NumericsError> = bicgstab_f64(
-        matrix, 2, span(b), span(x), span(r), span(rh), span(p), span(v), span(s), span(t), 20, 1.0e-12);
-    match (solved) { Ok(report) => { assert(report.converged); } Err(error) => { assert(false); } }
+            matrix, 2, span(b), span(x), span(r), span(rh), span(p), span(v),
+            span(s), span(t), 20, 1.0e-12);
+
+    match (solved) {
+        Ok(report) => { assert(report.converged); }
+        Err(error) => { assert(false); }
+    }
+
     assert(fabs(x[0] - 0.1) < 1.0e-10 && fabs(x[1] - 0.6) < 1.0e-10);
 }
 
 @test fn csr_solver_supports_matrix_free_diagonal_operator() {
-    let diagonal: [f64; 3] = [2.0, 4.0, 8.0];
-    let operator: DiagonalOperatorF64 = DiagonalOperatorF64 { diagonal: span(diagonal) };
-    let b: [f64; 3] = [2.0, 8.0, 24.0];
-    let mut x: [f64; 3] = [0.0, 0.0, 0.0]; let mut r: [f64; 3] = [0.0, 0.0, 0.0];
-    let mut p: [f64; 3] = [0.0, 0.0, 0.0]; let mut ap: [f64; 3] = [0.0, 0.0, 0.0];
-    let solved: Result<CGReport, NumericsError> = conjugate_gradient_operator_f64(
-        operator, 3, span(b), span(x), span(r), span(p), span(ap), 20, 1.0e-12);
-    match (solved) { Ok(report) => { assert(report.converged); } Err(error) => { assert(false); } }
-    assert(fabs(x[0] - 1.0) < 1.0e-12 && fabs(x[1] - 2.0) < 1.0e-12 && fabs(x[2] - 3.0) < 1.0e-12);
+    let diagonal: [f64;
+    3] = [2.0, 4.0, 8.0];
+
+    let operator: DiagonalOperatorF64 = DiagonalOperatorF64 {
+        diagonal: span(diagonal)
+    };
+
+    let b: [f64;
+    3] = [2.0, 8.0, 24.0];
+    let mut x: [f64;
+    3] = [0.0, 0.0, 0.0];
+    let mut r: [f64;
+    3] = [0.0, 0.0, 0.0];
+    let mut p: [f64;
+    3] = [0.0, 0.0, 0.0];
+    let mut ap: [f64;
+    3] = [0.0, 0.0, 0.0];
+    let solved: Result<CGReport, NumericsError> =
+        conjugate_gradient_operator_f64(
+            operator, 3, span(b), span(x), span(r), span(p), span(ap), 20,
+            1.0e-12);
+
+    match (solved) {
+        Ok(report) => { assert(report.converged); }
+        Err(error) => { assert(false); }
+    }
+
+    assert(fabs(x[0] - 1.0) < 1.0e-12 && fabs(x[1] - 2.0) < 1.0e-12 &&
+        fabs(x[2] - 3.0) < 1.0e-12);
 }
 
-
 @test fn csr_jacobi_preconditioner_drives_sparse_pcg() {
-    let offsets: [u64; 3] = [0, 2, 4];
-    let columns: [u64; 4] = [0, 1, 0, 1];
-    let values: [f64; 4] = [4.0, 1.0, 1.0, 3.0];
+    let offsets: [u64;
+    3] = [0, 2, 4];
+    let columns: [u64;
+    4] = [0, 1, 0, 1];
+    let values: [f64;
+    4] = [4.0, 1.0, 1.0, 3.0];
+
     let matrix: CSRMatrixF64 = CSRMatrixF64 {
         rows: 2, cols: 2, nnz: 4, row_offsets: span(offsets),
         col_indices: span(columns), values: span(values)
     };
-    let mut inverse: [f64; 2] = [0.0, 0.0];
-    let inverse_result: Result<u64, NumericsError> = csr_inverse_diagonal_f64(matrix, span(inverse));
-    match (inverse_result) { Ok(n) => { assert(n == 2); } Err(error) => { assert(false); } }
-    let preconditioner: JacobiPreconditionerF64 = JacobiPreconditionerF64 { inverse_diagonal: span(inverse) };
-    let b: [f64; 2] = [1.0, 2.0];
-    let mut x: [f64; 2] = [0.0, 0.0]; let mut r: [f64; 2] = [0.0, 0.0];
-    let mut z: [f64; 2] = [0.0, 0.0]; let mut p: [f64; 2] = [0.0, 0.0]; let mut ap: [f64; 2] = [0.0, 0.0];
-    let solved: Result<CGReport, NumericsError> = preconditioned_conjugate_gradient_f64(
-        matrix, preconditioner, 2, span(b), span(x), span(r), span(z), span(p), span(ap), 20, 1.0e-12);
-    match (solved) { Ok(report) => { assert(report.converged); } Err(error) => { assert(false); } }
-    assert(fabs(x[0] - 1.0 / 11.0) < 1.0e-10 && fabs(x[1] - 7.0 / 11.0) < 1.0e-10);
+
+    let mut inverse: [f64;
+    2] = [0.0, 0.0];
+    let inverse_result: Result<u64, NumericsError> = csr_inverse_diagonal_f64(
+            matrix, span(inverse));
+
+    match (inverse_result) {
+        Ok(n) => { assert(n == 2); }
+        Err(error) => { assert(false); }
+    }
+
+    let preconditioner: JacobiPreconditionerF64 = JacobiPreconditionerF64 {
+        inverse_diagonal: span(inverse)
+    };
+
+    let b: [f64;
+    2] = [1.0, 2.0];
+    let mut x: [f64;
+    2] = [0.0, 0.0];
+    let mut r: [f64;
+    2] = [0.0, 0.0];
+    let mut z: [f64;
+    2] = [0.0, 0.0];
+    let mut p: [f64;
+    2] = [0.0, 0.0];
+    let mut ap: [f64;
+    2] = [0.0, 0.0];
+    let solved: Result<CGReport, NumericsError> =
+        preconditioned_conjugate_gradient_f64(
+            matrix, preconditioner, 2, span(b), span(x), span(r), span(z),
+            span(p), span(ap), 20, 1.0e-12);
+
+    match (solved) {
+        Ok(report) => { assert(report.converged); }
+        Err(error) => { assert(false); }
+    }
+
+    assert(fabs(x[0] - 1.0 / 11.0) < 1.0e-10 &&
+        fabs(x[1] - 7.0 / 11.0) < 1.0e-10);
 }
 
-
 @test fn linear_operator_must_report_the_full_output_length() {
-    let b: [f64; 2] = [1.0, 1.0];
-    let mut x: [f64; 2] = [0.0, 0.0];
-    let mut r: [f64; 2] = [0.0, 0.0];
-    let mut p: [f64; 2] = [0.0, 0.0];
-    let mut ap: [f64; 2] = [0.0, 0.0];
-    let solved: Result<CGReport, NumericsError> = conjugate_gradient_operator_f64(
-        ShortOperatorF64 {}, 2, span(b), span(x), span(r), span(p), span(ap), 4, 1.0e-8);
+    let b: [f64;
+    2] = [1.0, 1.0];
+    let mut x: [f64;
+    2] = [0.0, 0.0];
+    let mut r: [f64;
+    2] = [0.0, 0.0];
+    let mut p: [f64;
+    2] = [0.0, 0.0];
+    let mut ap: [f64;
+    2] = [0.0, 0.0];
+    let solved: Result<CGReport, NumericsError> =
+        conjugate_gradient_operator_f64(
+            ShortOperatorF64 {}, 2, span(b), span(x), span(r), span(p),
+            span(ap), 4, 1.0e-8);
+
     match (solved) {
         Ok(report) => { assert(false); }
         Err(DimensionMismatch) => { assert(true); }
@@ -219,15 +449,22 @@ import freshet_numerics;
     }
 }
 
-
 @test fn matrix_free_operator_nonfinite_output_is_rejected() {
-    let b: [f64; 1] = [1.0];
-    let mut x: [f64; 1] = [2.0];
-    let mut r: [f64; 1] = [0.0];
-    let mut p: [f64; 1] = [0.0];
-    let mut ap: [f64; 1] = [0.0];
-    let solved: Result<CGReport, NumericsError> = conjugate_gradient_operator_f64(
-        OverflowOperatorF64 {}, 1, span(b), span(x), span(r), span(p), span(ap), 4, 1.0e-8);
+    let b: [f64;
+    1] = [1.0];
+    let mut x: [f64;
+    1] = [2.0];
+    let mut r: [f64;
+    1] = [0.0];
+    let mut p: [f64;
+    1] = [0.0];
+    let mut ap: [f64;
+    1] = [0.0];
+    let solved: Result<CGReport, NumericsError> =
+        conjugate_gradient_operator_f64(
+            OverflowOperatorF64 {}, 1, span(b), span(x), span(r), span(p),
+            span(ap), 4, 1.0e-8);
+
     match (solved) {
         Ok(report) => { assert(false); }
         Err(NonFiniteResult) => { assert(true); }
@@ -235,172 +472,349 @@ import freshet_numerics;
     }
 }
 
-
 @test fn dense_matrix_validation_and_symmetry_are_reported() {
-    let symmetric: [f64; 4] = [4.0, 1.0, 1.0, 3.0];
-    let matrix: DenseMatrixF64 = DenseMatrixF64 { rows: 2, cols: 2, values: span(symmetric) };
-    let validated: Result<u64, NumericsError> = dense_matrix_validate_f64(matrix);
-    match (validated) { Ok(count) => { assert(count == 4); } Err(error) => { assert(false); } }
-    let is_symmetric: Result<bool, NumericsError> = dense_matrix_is_symmetric_f64(matrix);
-    match (is_symmetric) { Ok(value) => { assert(value); } Err(error) => { assert(false); } }
-    let skew: [f64; 4] = [4.0, 1.0, 2.0, 3.0];
-    let other: DenseMatrixF64 = DenseMatrixF64 { rows: 2, cols: 2, values: span(skew) };
-    let not_symmetric: Result<bool, NumericsError> = dense_matrix_is_symmetric_f64(other);
-    match (not_symmetric) { Ok(value) => { assert(!value); } Err(error) => { assert(false); } }
+    let symmetric: [f64;
+    4] = [4.0, 1.0, 1.0, 3.0];
+
+    let matrix: DenseMatrixF64 = DenseMatrixF64 {
+        rows: 2, cols: 2, values: span(symmetric)
+    };
+
+    let validated: Result<u64, NumericsError> =
+        dense_matrix_validate_f64(matrix);
+
+    match (validated) {
+        Ok(count) => { assert(count == 4); }
+        Err(error) => { assert(false); }
+    }
+
+    let is_symmetric: Result<bool, NumericsError> =
+        dense_matrix_is_symmetric_f64(matrix);
+
+    match (is_symmetric) {
+        Ok(value) => { assert(value); }
+        Err(error) => { assert(false); }
+    }
+
+    let skew: [f64;
+    4] = [4.0, 1.0, 2.0, 3.0];
+
+    let other: DenseMatrixF64 = DenseMatrixF64 {
+        rows: 2, cols: 2, values: span(skew)
+    };
+
+    let not_symmetric: Result<bool, NumericsError> =
+        dense_matrix_is_symmetric_f64(other);
+
+    match (not_symmetric) {
+        Ok(value) => { assert(!value); }
+        Err(error) => { assert(false); }
+    }
+
     // non-square matrices are rejected
-    let rectangular: Result<bool, NumericsError> = dense_matrix_is_symmetric_f64(DenseMatrixF64 { rows: 2, cols: 1, values: span(symmetric) });
-    match (rectangular) { Ok(value) => { assert(false); } Err(DimensionMismatch) => { assert(true); } Err(error) => { assert(false); } }
+    let rectangular: Result<bool, NumericsError> =
+        dense_matrix_is_symmetric_f64(DenseMatrixF64 {
+        rows: 2, cols: 1, values: span(symmetric)
+    });
+
+    match (rectangular) {
+        Ok(value) => { assert(false); }
+        Err(DimensionMismatch) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn csr_merge_duplicates_sums_and_sorts_rows() {
     // COO with unsorted, duplicated entries for a 2x2 matrix
-    let rows: [u64; 5] = [1, 0, 0, 1, 0];
-    let cols: [u64; 5] = [0, 1, 0, 1, 1];
-    let values: [f64; 5] = [2.0, 3.0, 4.0, 5.0, 1.0];
-    let mut offsets: [u64; 3] = [0, 0, 0];
-    let mut csr_cols: [u64; 5] = [0, 0, 0, 0, 0];
-    let mut csr_values: [f64; 5] = [0.0, 0.0, 0.0, 0.0, 0.0];
-    let mut cursor: [u64; 2] = [0, 0];
+    let rows: [u64;
+    5] = [1, 0, 0, 1, 0];
+    let cols: [u64;
+    5] = [0, 1, 0, 1, 1];
+    let values: [f64;
+    5] = [2.0, 3.0, 4.0, 5.0, 1.0];
+    let mut offsets: [u64;
+    3] = [0, 0, 0];
+    let mut csr_cols: [u64;
+    5] = [0, 0, 0, 0, 0];
+    let mut csr_values: [f64;
+    5] = [0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut cursor: [u64;
+    2] = [0, 0];
     let assembled: Result<u64, NumericsError> = coo_to_csr_f64(
-        2, 2, span(rows), span(cols), span(values), span(offsets), span(csr_cols), span(csr_values), span(cursor));
-    match (assembled) { Ok(nnz) => { assert(nnz == 5); } Err(error) => { assert(false); } }
+            2, 2, span(rows), span(cols), span(values), span(offsets),
+            span(csr_cols), span(csr_values), span(cursor));
+
+    match (assembled) {
+        Ok(nnz) => { assert(nnz == 5); }
+        Err(error) => { assert(false); }
+    }
+
     let matrix: CSRMatrixF64 = CSRMatrixF64 {
         rows: 2, cols: 2, nnz: 5, row_offsets: span(offsets),
         col_indices: span(csr_cols), values: span(csr_values)
     };
-    let mut merged_offsets: [u64; 3] = [0, 0, 0];
-    let mut merged_cols: [u64; 5] = [0, 0, 0, 0, 0];
-    let mut merged_values: [f64; 5] = [0.0, 0.0, 0.0, 0.0, 0.0];
+
+    let mut merged_offsets: [u64;
+    3] = [0, 0, 0];
+    let mut merged_cols: [u64;
+    5] = [0, 0, 0, 0, 0];
+    let mut merged_values: [f64;
+    5] = [0.0, 0.0, 0.0, 0.0, 0.0];
     let merged: Result<u64, NumericsError> = csr_merge_duplicates_f64(
-        matrix, span(merged_offsets), span(merged_cols), span(merged_values));
-    match (merged) { Ok(nnz) => { assert(nnz == 4); } Err(error) => { assert(false); } }
+            matrix, span(merged_offsets), span(merged_cols),
+            span(merged_values));
+
+    match (merged) {
+        Ok(nnz) => { assert(nnz == 4); }
+        Err(error) => { assert(false); }
+    }
+
     // row 0: (0, 4.0) and (1, 3.0+1.0 = 4.0), sorted; row 1: (0, 2.0) and (1, 5.0)
-    assert(merged_offsets[0] == 0 && merged_offsets[1] == 2 && merged_offsets[2] == 4);
+    assert(merged_offsets[0] == 0 && merged_offsets[1] == 2 && merged_offsets[2] ==
+        4);
     assert(merged_cols[0] == 0 && merged_values[0] == 4.0);
     assert(merged_cols[1] == 1 && merged_values[1] == 4.0);
     assert(merged_cols[2] == 0 && merged_values[2] == 2.0);
     assert(merged_cols[3] == 1 && merged_values[3] == 5.0);
+
     let merged_matrix: CSRMatrixF64 = CSRMatrixF64 {
         rows: 2, cols: 2, nnz: 4, row_offsets: span(merged_offsets),
         col_indices: span(merged_cols), values: span(merged_values)
     };
-    let x: [f64; 2] = [1.0, 2.0];
-    let mut y: [f64; 2] = [0.0, 0.0];
-    let product: Result<u64, NumericsError> = csr_matvec_f64(merged_matrix, span(x), span(y));
-    match (product) { Ok(n) => { assert(n == 2); } Err(error) => { assert(false); } }
+
+    let x: [f64;
+    2] = [1.0, 2.0];
+    let mut y: [f64;
+    2] = [0.0, 0.0];
+    let product: Result<u64, NumericsError> = csr_matvec_f64(
+            merged_matrix, span(x), span(y));
+
+    match (product) {
+        Ok(n) => { assert(n == 2); }
+        Err(error) => { assert(false); }
+    }
+
     assert(y[0] == 12.0 && y[1] == 12.0);
 }
 
 @test fn csr_symmetry_check_matches_the_matrix() {
     // symmetric tridiagonal matrix with duplicates summed naturally
-    let rows: [u64; 4] = [0, 0, 1, 1];
-    let cols: [u64; 4] = [0, 1, 0, 1];
-    let values: [f64; 4] = [4.0, 1.0, 1.0, 3.0];
-    let mut offsets: [u64; 3] = [0, 0, 0];
-    let mut csr_cols: [u64; 4] = [0, 0, 0, 0];
-    let mut csr_values: [f64; 4] = [0.0, 0.0, 0.0, 0.0];
-    let mut cursor: [u64; 2] = [0, 0];
+    let rows: [u64;
+    4] = [0, 0, 1, 1];
+    let cols: [u64;
+    4] = [0, 1, 0, 1];
+    let values: [f64;
+    4] = [4.0, 1.0, 1.0, 3.0];
+    let mut offsets: [u64;
+    3] = [0, 0, 0];
+    let mut csr_cols: [u64;
+    4] = [0, 0, 0, 0];
+    let mut csr_values: [f64;
+    4] = [0.0, 0.0, 0.0, 0.0];
+    let mut cursor: [u64;
+    2] = [0, 0];
     let assembled: Result<u64, NumericsError> = coo_to_csr_f64(
-        2, 2, span(rows), span(cols), span(values), span(offsets), span(csr_cols), span(csr_values), span(cursor));
-    match (assembled) { Ok(nnz) => { assert(nnz == 4); } Err(error) => { assert(false); } }
+            2, 2, span(rows), span(cols), span(values), span(offsets),
+            span(csr_cols), span(csr_values), span(cursor));
+
+    match (assembled) {
+        Ok(nnz) => { assert(nnz == 4); }
+        Err(error) => { assert(false); }
+    }
+
     let matrix: CSRMatrixF64 = CSRMatrixF64 {
         rows: 2, cols: 2, nnz: 4, row_offsets: span(offsets),
         col_indices: span(csr_cols), values: span(csr_values)
     };
+
     let symmetric: Result<bool, NumericsError> = csr_is_symmetric_f64(matrix);
-    match (symmetric) { Ok(value) => { assert(value); } Err(error) => { assert(false); } }
+
+    match (symmetric) {
+        Ok(value) => { assert(value); }
+        Err(error) => { assert(false); }
+    }
+
     // break the symmetry: change the (1,0) value only
-    let mut broken_values: [f64; 4] = [4.0, 1.0, 2.0, 3.0];
+    let mut broken_values: [f64;
+    4] = [4.0, 1.0, 2.0, 3.0];
+
     let broken: CSRMatrixF64 = CSRMatrixF64 {
         rows: 2, cols: 2, nnz: 4, row_offsets: span(offsets),
         col_indices: span(csr_cols), values: span(broken_values)
     };
-    let not_symmetric: Result<bool, NumericsError> = csr_is_symmetric_f64(broken);
-    match (not_symmetric) { Ok(value) => { assert(!value); } Err(error) => { assert(false); } }
+
+    let not_symmetric: Result<bool, NumericsError> =
+        csr_is_symmetric_f64(broken);
+
+    match (not_symmetric) {
+        Ok(value) => { assert(!value); }
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn gmres_solves_nonsymmetric_system_with_identity_preconditioner() {
     // the same nonsymmetric 2x2 as the BiCGStab test: x = (0.1, 0.6)
-    let matrix_values: [f64; 4] = [4.0, 1.0, 2.0, 3.0];
-    let matrix: DenseMatrixF64 = DenseMatrixF64 { rows: 2, cols: 2, values: span(matrix_values) };
-    let b: [f64; 2] = [1.0, 2.0];
-    let mut x: [f64; 2] = [0.0, 0.0];
-    let mut krylov: [f64; 6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-    let mut hessenberg: [f64; 6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-    let mut cosines: [f64; 2] = [0.0, 0.0];
-    let mut sines: [f64; 2] = [0.0, 0.0];
-    let mut givens: [f64; 3] = [0.0, 0.0, 0.0];
-    let mut y_coefficients: [f64; 2] = [0.0, 0.0];
-    let mut update: [f64; 2] = [0.0, 0.0];
+    let matrix_values: [f64;
+    4] = [4.0, 1.0, 2.0, 3.0];
+
+    let matrix: DenseMatrixF64 = DenseMatrixF64 {
+        rows: 2, cols: 2, values: span(matrix_values)
+    };
+
+    let b: [f64;
+    2] = [1.0, 2.0];
+    let mut x: [f64;
+    2] = [0.0, 0.0];
+    let mut krylov: [f64;
+    6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut hessenberg: [f64;
+    6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut cosines: [f64;
+    2] = [0.0, 0.0];
+    let mut sines: [f64;
+    2] = [0.0, 0.0];
+    let mut givens: [f64;
+    3] = [0.0, 0.0, 0.0];
+    let mut y_coefficients: [f64;
+    2] = [0.0, 0.0];
+    let mut update: [f64;
+    2] = [0.0, 0.0];
     let identity: IdentityPreconditionerF64 = IdentityPreconditionerF64 { };
     let solved: Result<KrylovReport, NumericsError> = preconditioned_gmres_f64(
-        matrix, identity, 2, span(b), span(x), span(krylov), span(hessenberg),
-        span(cosines), span(sines), span(givens), span(y_coefficients), span(update),
-        2, 20, 1.0e-12);
+            matrix, identity, 2, span(b), span(x), span(krylov),
+            span(hessenberg), span(cosines), span(sines), span(givens),
+            span(y_coefficients), span(update), 2, 20, 1.0e-12);
+
     match (solved) {
-        Ok(report) => { assert(report.converged); assert(report.residual_norm < 1.0e-12); }
+        Ok(report) => {
+            assert(report.converged);
+            assert(report.residual_norm < 1.0e-12);
+        }
+
         Err(error) => { assert(false); }
     }
+
     assert(fabs(x[0] - 0.1) < 1.0e-10 && fabs(x[1] - 0.6) < 1.0e-10);
 }
 
 @test fn gmres_accepts_a_jacobi_preconditioner_and_restarts() {
     // restart = 1 forces the restart path while still converging
-    let matrix_values: [f64; 4] = [4.0, 1.0, 2.0, 3.0];
-    let matrix: DenseMatrixF64 = DenseMatrixF64 { rows: 2, cols: 2, values: span(matrix_values) };
-    let b: [f64; 2] = [1.0, 2.0];
-    let mut x: [f64; 2] = [0.0, 0.0];
-    let mut krylov: [f64; 4] = [0.0, 0.0, 0.0, 0.0];
-    let mut hessenberg: [f64; 2] = [0.0, 0.0];
-    let mut cosines: [f64; 1] = [0.0];
-    let mut sines: [f64; 1] = [0.0];
-    let mut givens: [f64; 2] = [0.0, 0.0];
-    let mut y_coefficients: [f64; 1] = [0.0];
-    let mut update: [f64; 2] = [0.0, 0.0];
-    let diagonal: [f64; 2] = [4.0, 3.0];
-    let mut inverse: [f64; 2] = [0.0, 0.0];
-    let inverted: Result<u64, NumericsError> = diagonal_inverse_f64(span(diagonal), span(inverse));
-    match (inverted) { Ok(n) => { assert(n == 2); } Err(error) => { assert(false); } }
-    let preconditioner: JacobiPreconditionerF64 = JacobiPreconditionerF64 { inverse_diagonal: span(inverse) };
+    let matrix_values: [f64;
+    4] = [4.0, 1.0, 2.0, 3.0];
+
+    let matrix: DenseMatrixF64 = DenseMatrixF64 {
+        rows: 2, cols: 2, values: span(matrix_values)
+    };
+
+    let b: [f64;
+    2] = [1.0, 2.0];
+    let mut x: [f64;
+    2] = [0.0, 0.0];
+    let mut krylov: [f64;
+    4] = [0.0, 0.0, 0.0, 0.0];
+    let mut hessenberg: [f64;
+    2] = [0.0, 0.0];
+    let mut cosines: [f64;
+    1] = [0.0];
+    let mut sines: [f64;
+    1] = [0.0];
+    let mut givens: [f64;
+    2] = [0.0, 0.0];
+    let mut y_coefficients: [f64;
+    1] = [0.0];
+    let mut update: [f64;
+    2] = [0.0, 0.0];
+    let diagonal: [f64;
+    2] = [4.0, 3.0];
+    let mut inverse: [f64;
+    2] = [0.0, 0.0];
+    let inverted: Result<u64, NumericsError> = diagonal_inverse_f64(
+            span(diagonal), span(inverse));
+
+    match (inverted) {
+        Ok(n) => { assert(n == 2); }
+        Err(error) => { assert(false); }
+    }
+
+    let preconditioner: JacobiPreconditionerF64 = JacobiPreconditionerF64 {
+        inverse_diagonal: span(inverse)
+    };
+
     let solved: Result<KrylovReport, NumericsError> = preconditioned_gmres_f64(
-        matrix, preconditioner, 2, span(b), span(x), span(krylov), span(hessenberg),
-        span(cosines), span(sines), span(givens), span(y_coefficients), span(update),
-        1, 100, 1.0e-10);
+            matrix, preconditioner, 2, span(b), span(x), span(krylov),
+            span(hessenberg), span(cosines), span(sines), span(givens),
+            span(y_coefficients), span(update), 1, 100, 1.0e-10);
+
     match (solved) {
         Ok(report) => { assert(report.converged); }
         Err(error) => { assert(false); }
     }
+
     assert(fabs(x[0] - 0.1) < 1.0e-8 && fabs(x[1] - 0.6) < 1.0e-8);
 }
 
 @test fn gmres_rejects_invalid_restart_tolerance_and_workspaces() {
-    let matrix_values: [f64; 1] = [1.0];
-    let matrix: DenseMatrixF64 = DenseMatrixF64 { rows: 1, cols: 1, values: span(matrix_values) };
-    let b: [f64; 1] = [1.0];
-    let mut x: [f64; 1] = [0.0];
-    let mut krylov: [f64; 2] = [0.0, 0.0];
-    let mut hessenberg: [f64; 2] = [0.0, 0.0];
-    let mut cosines: [f64; 1] = [0.0];
-    let mut sines: [f64; 1] = [0.0];
-    let mut givens: [f64; 2] = [0.0, 0.0];
-    let mut y_coefficients: [f64; 1] = [0.0];
-    let mut update: [f64; 1] = [0.0];
+    let matrix_values: [f64;
+    1] = [1.0];
+
+    let matrix: DenseMatrixF64 = DenseMatrixF64 {
+        rows: 1, cols: 1, values: span(matrix_values)
+    };
+
+    let b: [f64;
+    1] = [1.0];
+    let mut x: [f64;
+    1] = [0.0];
+    let mut krylov: [f64;
+    2] = [0.0, 0.0];
+    let mut hessenberg: [f64;
+    2] = [0.0, 0.0];
+    let mut cosines: [f64;
+    1] = [0.0];
+    let mut sines: [f64;
+    1] = [0.0];
+    let mut givens: [f64;
+    2] = [0.0, 0.0];
+    let mut y_coefficients: [f64;
+    1] = [0.0];
+    let mut update: [f64;
+    1] = [0.0];
     let identity: IdentityPreconditionerF64 = IdentityPreconditionerF64 { };
-    let zero_restart: Result<KrylovReport, NumericsError> = preconditioned_gmres_f64(
-        matrix, identity, 1, span(b), span(x), span(krylov), span(hessenberg),
-        span(cosines), span(sines), span(givens), span(y_coefficients), span(update),
-        0, 4, 1.0e-10);
-    match (zero_restart) { Ok(report) => { assert(false); } Err(InvalidDimension) => { assert(true); } Err(error) => { assert(false); } }
+    let zero_restart: Result<KrylovReport, NumericsError> =
+        preconditioned_gmres_f64(
+            matrix, identity, 1, span(b), span(x), span(krylov),
+            span(hessenberg), span(cosines), span(sines), span(givens),
+            span(y_coefficients), span(update), 0, 4, 1.0e-10);
+
+    match (zero_restart) {
+        Ok(report) => { assert(false); }
+        Err(InvalidDimension) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+
     let infinity: f64 = 1.0e308 * 1.0e308;
     let nan: f64 = infinity - infinity;
-    let nan_tolerance: Result<KrylovReport, NumericsError> = preconditioned_gmres_f64(
-        matrix, identity, 1, span(b), span(x), span(krylov), span(hessenberg),
-        span(cosines), span(sines), span(givens), span(y_coefficients), span(update),
-        1, 4, nan);
-    match (nan_tolerance) { Ok(report) => { assert(false); } Err(InvalidTolerance) => { assert(true); } Err(error) => { assert(false); } }
-    let short_krylov: Result<KrylovReport, NumericsError> = preconditioned_gmres_f64(
-        matrix, identity, 1, span(b), span(x), span(cosines), span(hessenberg),
-        span(cosines), span(sines), span(givens), span(y_coefficients), span(update),
-        1, 4, 1.0e-10);
-    match (short_krylov) { Ok(report) => { assert(false); } Err(DimensionMismatch) => { assert(true); } Err(error) => { assert(false); } }
+    let nan_tolerance: Result<KrylovReport, NumericsError> =
+        preconditioned_gmres_f64(
+            matrix, identity, 1, span(b), span(x), span(krylov),
+            span(hessenberg), span(cosines), span(sines), span(givens),
+            span(y_coefficients), span(update), 1, 4, nan);
+
+    match (nan_tolerance) {
+        Ok(report) => { assert(false); }
+        Err(InvalidTolerance) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+
+    let short_krylov: Result<KrylovReport, NumericsError> =
+        preconditioned_gmres_f64(
+            matrix, identity, 1, span(b), span(x), span(cosines),
+            span(hessenberg), span(cosines), span(sines), span(givens),
+            span(y_coefficients), span(update), 1, 4, 1.0e-10);
+
+    match (short_krylov) {
+        Ok(report) => { assert(false); }
+        Err(DimensionMismatch) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
 }

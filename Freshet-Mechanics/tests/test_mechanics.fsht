@@ -11,16 +11,48 @@ import structural;
 import freshet_numerics;
 
 @test fn dimensional_quantities_allow_only_matching_addition() {
-    let length: Result<QuantitySI, MechanicsError> = quantity_si(2.0, 1, 0, 0, 0, 0, 0, 0);
-    let another_length: Result<QuantitySI, MechanicsError> = quantity_si(300.0, 1, 0, 0, 0, 0, 0, 0);
-    let time: Result<QuantitySI, MechanicsError> = quantity_si(5.0, 0, 0, 1, 0, 0, 0, 0);
-    let a: QuantitySI = QuantitySI { value: 2.0, length_power: 1, mass_power: 0, time_power: 0, current_power: 0, temperature_power: 0, amount_power: 0, luminous_intensity_power: 0 };
-    let b: QuantitySI = QuantitySI { value: 300.0, length_power: 1, mass_power: 0, time_power: 0, current_power: 0, temperature_power: 0, amount_power: 0, luminous_intensity_power: 0 };
-    let wrong: QuantitySI = QuantitySI { value: 5.0, length_power: 0, mass_power: 0, time_power: 1, current_power: 0, temperature_power: 0, amount_power: 0, luminous_intensity_power: 0 };
+    let length: Result<QuantitySI, MechanicsError> = quantity_si(
+            2.0, 1, 0, 0, 0, 0, 0, 0);
+    let another_length: Result<QuantitySI, MechanicsError> = quantity_si(
+            300.0, 1, 0, 0, 0, 0, 0, 0);
+    let time: Result<QuantitySI, MechanicsError> = quantity_si(
+            5.0, 0, 0, 1, 0, 0, 0, 0);
+
+    let a: QuantitySI = QuantitySI {
+        value: 2.0, length_power: 1, mass_power: 0, time_power: 0,
+        current_power: 0, temperature_power: 0, amount_power: 0,
+        luminous_intensity_power: 0
+    };
+
+    let b: QuantitySI = QuantitySI {
+        value: 300.0, length_power: 1, mass_power: 0, time_power: 0,
+        current_power: 0, temperature_power: 0, amount_power: 0,
+        luminous_intensity_power: 0
+    };
+
+    let wrong: QuantitySI = QuantitySI {
+        value: 5.0, length_power: 0, mass_power: 0, time_power: 1,
+        current_power: 0, temperature_power: 0, amount_power: 0,
+        luminous_intensity_power: 0
+    };
+
     let added: Result<QuantitySI, MechanicsError> = quantity_add_si(a, b);
-    let mismatch: Result<QuantitySI, MechanicsError> = quantity_add_si(a, wrong);
-    match (added) { Ok(value) => { assert(value.value == 302.0 && value.length_power == 1); } Err(error) => { assert(false); } }
-    match (mismatch) { Ok(value) => { assert(false); } Err(MechanicsDimensionMismatch) => { assert(true); } Err(error) => { assert(false); } }
+    let mismatch: Result<QuantitySI, MechanicsError> = quantity_add_si(
+            a, wrong);
+
+    match (added) {
+        Ok(value) => {
+            assert(value.value == 302.0 && value.length_power == 1);
+        }
+        Err(error) => { assert(false); }
+    }
+
+    match (mismatch) {
+        Ok(value) => { assert(false); }
+        Err(MechanicsDimensionMismatch) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+
     assert(millimetres(25.0) == 0.025);
 }
 
@@ -29,170 +61,365 @@ import freshet_numerics;
     let b: Vector3 = Vector3 { x: 0.0, y: 1.0, z: 0.0 };
     let cross: Vector3 = cross3(a, b);
     assert(cross.z == 1.0 && dot3(a, b) == 0.0);
-    let positions: [Vector2; 2] = [Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }];
-    let forces: [Vector2; 2] = [Vector2 { x: 0.0, y: 10.0 }, Vector2 { x: -5.0, y: 0.0 }];
-    let result: Result<ForceMoment2D, MechanicsError> = resultant_force_moment_2d(span(positions), span(forces));
+    let positions: [Vector2;
+    2] = [Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }];
+    let forces: [Vector2;
+    2] = [Vector2 { x: 0.0, y: 10.0 }, Vector2 { x: -5.0, y: 0.0 }];
+    let result: Result<ForceMoment2D, MechanicsError> =
+        resultant_force_moment_2d(span(positions), span(forces));
+
     match (result) {
-        Ok(value) => { assert(value.resultant.x == -5.0 && value.resultant.y == 10.0); assert(value.moment_about_origin_nm == 15.0); }
+        Ok(value) => {
+            assert(value.resultant.x == -5.0 && value.resultant.y == 10.0);
+            assert(value.moment_about_origin_nm == 15.0);
+        }
+
         Err(error) => { assert(false); }
     }
 }
 
 @test fn isotropic_material_and_elastic_moduli_are_validated() {
-    let result: Result<IsotropicMaterial, MechanicsError> = isotropic_material(200.0e9, 0.3, 7850.0, megapascals(250.0));
+    let result: Result<IsotropicMaterial, MechanicsError> = isotropic_material(
+            200.0e9, 0.3, 7850.0, megapascals(250.0));
+
     match (result) {
         Ok(material) => {
             let shear: Result<f64, MechanicsError> = shear_modulus_pa(material);
             let bulk: Result<f64, MechanicsError> = bulk_modulus_pa(material);
-            match (shear) { Ok(value) => { assert(fabs(value - 76.923076923e9) < 1.0e6); } Err(error) => { assert(false); } }
-            match (bulk) { Ok(value) => { assert(fabs(value - 166.666666667e9) < 1.0e6); } Err(error) => { assert(false); } }
+            match (shear) {
+                Ok(value) => { assert(fabs(value - 76.923076923e9) < 1.0e6); }
+                Err(error) => { assert(false); }
+            }
+
+            match (bulk) {
+                Ok(value) => { assert(fabs(value - 166.666666667e9) < 1.0e6); }
+                Err(error) => { assert(false); }
+            }
         }
+
         Err(error) => { assert(false); }
     }
-    let invalid: Result<IsotropicMaterial, MechanicsError> = isotropic_material(1.0, 0.5, 1.0, 1.0);
-    match (invalid) { Ok(material) => { assert(false); } Err(InvalidMaterial) => { assert(true); } Err(error) => { assert(false); } }
-}
 
+    let invalid: Result<IsotropicMaterial, MechanicsError> = isotropic_material(
+            1.0, 0.5, 1.0, 1.0);
+
+    match (invalid) {
+        Ok(material) => { assert(false); }
+        Err(InvalidMaterial) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+}
 
 @test fn material_response_functions_revalidate_public_material_values() {
     let invalid: IsotropicMaterial = IsotropicMaterial {
-        young_modulus_pa: -1.0, poisson_ratio: 0.3,
-        density_kg_m3: 7850.0, yield_strength_pa: 250.0e6
+        young_modulus_pa: -1.0, poisson_ratio: 0.3, density_kg_m3: 7850.0,
+        yield_strength_pa: 250.0e6
     };
+
     let shear: Result<f64, MechanicsError> = shear_modulus_pa(invalid);
     let bulk: Result<f64, MechanicsError> = bulk_modulus_pa(invalid);
-    match (shear) { Ok(value) => { assert(false); } Err(InvalidMaterial) => { assert(true); } Err(error) => { assert(false); } }
-    match (bulk) { Ok(value) => { assert(false); } Err(InvalidMaterial) => { assert(true); } Err(error) => { assert(false); } }
+
+    match (shear) {
+        Ok(value) => { assert(false); }
+        Err(InvalidMaterial) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+
+    match (bulk) {
+        Ok(value) => { assert(false); }
+        Err(InvalidMaterial) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn beam_reference_cases_match_closed_form() {
-    let udl: Result<BeamResponse, MechanicsError> = simply_supported_udl_f64(1000.0, 4.0, 200.0e9, 8.0e-6);
+    let udl: Result<BeamResponse, MechanicsError> = simply_supported_udl_f64(
+            1000.0, 4.0, 200.0e9, 8.0e-6);
+
     match (udl) {
         Ok(result) => {
             assert(fabs(result.maximum_shear_n - 2000.0) < 1.0e-9);
             assert(fabs(result.maximum_moment_nm - 2000.0) < 1.0e-9);
             assert(fabs(result.maximum_deflection_m - 0.0020833333333333333) < 1.0e-10);
         }
+
         Err(error) => { assert(false); }
     }
-    let cantilever: Result<BeamResponse, MechanicsError> = cantilever_end_load_f64(100.0, 2.0, 200.0e9, 1.0e-5);
-    match (cantilever) { Ok(result) => { assert(result.maximum_shear_n == 100.0); assert(result.maximum_moment_nm == 200.0); } Err(error) => { assert(false); } }
+
+    let cantilever: Result<BeamResponse, MechanicsError> =
+        cantilever_end_load_f64(100.0, 2.0, 200.0e9, 1.0e-5);
+
+    match (cantilever) {
+        Ok(result) => {
+            assert(result.maximum_shear_n == 100.0);
+            assert(result.maximum_moment_nm == 200.0);
+        }
+
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn truss_element_stiffness_is_symmetric() {
-    let mut stiffness: [f64; 16] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-    let result: Result<u64, MechanicsError> = truss_element_stiffness_2d(0.0, 0.0, 3.0, 4.0, 200.0e9, 0.01, span(stiffness));
-    match (result) { Ok(n) => { assert(n == 16); } Err(error) => { assert(false); } }
-    for (row in 0..4) { for (col in 0..4) { assert(fabs(stiffness[row * 4 + col] - stiffness[col * 4 + row]) < 1.0e-6); } }
+    let mut stiffness: [f64;
+    16] = [
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0];
+    let result: Result<u64, MechanicsError> = truss_element_stiffness_2d(
+            0.0, 0.0, 3.0, 4.0, 200.0e9, 0.01, span(stiffness));
+
+    match (result) {
+        Ok(n) => { assert(n == 16); }
+        Err(error) => { assert(false); }
+    }
+
+    for (row in 0..4) {
+        for (col in 0..4) {
+            assert(fabs(stiffness[row * 4 + col] - stiffness[col * 4 + row]) < 1.0e-6);
+        }
+    }
 }
 
 @test fn plane_stress_von_mises_matches_reference() {
-    let state: PlaneStress2D = PlaneStress2D { sigma_x_pa: 100.0e6, sigma_y_pa: 0.0, tau_xy_pa: 0.0 };
+    let state: PlaneStress2D = PlaneStress2D {
+        sigma_x_pa: 100.0e6, sigma_y_pa: 0.0, tau_xy_pa: 0.0
+    };
+
     let result: Result<f64, MechanicsError> = plane_stress_von_mises_f64(state);
-    match (result) { Ok(value) => { assert(fabs(value - 100.0e6) < 1.0); } Err(error) => { assert(false); } }
+
+    match (result) {
+        Ok(value) => { assert(fabs(value - 100.0e6) < 1.0); }
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn one_dimensional_bar_fem_assembles_and_solves() {
-    let coordinates: [f64; 3] = [0.0, 1.0, 2.0];
-    let node_a: [u64; 2] = [0, 1]; let node_b: [u64; 2] = [1, 2];
-    let mut stiffness: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-    let mut load: [f64; 3] = [0.0, 1000.0, 0.0];
+    let coordinates: [f64;
+    3] = [0.0, 1.0, 2.0];
+    let node_a: [u64;
+    2] = [0, 1];
+    let node_b: [u64;
+    2] = [1, 2];
+    let mut stiffness: [f64;
+    9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut load: [f64;
+    3] = [0.0, 1000.0, 0.0];
     let assembled: Result<u64, MechanicsError> = assemble_bar_system_1d(
-        3, 2, span(coordinates), span(node_a), span(node_b), 200.0e9, 0.01, span(stiffness), span(load));
-    match (assembled) { Ok(n) => { assert(n == 2); } Err(error) => { assert(false); } }
-    let constrained: [bool; 3] = [true, false, true];
-    let prescribed: [f64; 3] = [0.0, 0.0, 0.0];
-    let applied: Result<u64, MechanicsError> = apply_dirichlet_constraints_f64(3, span(constrained), span(prescribed), span(stiffness), span(load));
-    match (applied) { Ok(n) => { assert(n == 3); } Err(error) => { assert(false); } }
-    let mut x: [f64; 3] = [0.0, 0.0, 0.0];
-    let mut r: [f64; 3] = [0.0, 0.0, 0.0];
-    let mut p: [f64; 3] = [0.0, 0.0, 0.0];
-    let mut ap: [f64; 3] = [0.0, 0.0, 0.0];
-    let solved: Result<CGReport, MechanicsError> = solve_spd_system_f64(3, span(stiffness), span(load), span(x), span(r), span(p), span(ap), 20, 1.0e-12);
-    match (solved) { Ok(report) => { assert(report.converged); } Err(error) => { assert(false); } }
+            3, 2, span(coordinates), span(node_a), span(node_b), 200.0e9, 0.01,
+            span(stiffness), span(load));
+
+    match (assembled) {
+        Ok(n) => { assert(n == 2); }
+        Err(error) => { assert(false); }
+    }
+
+    let constrained: [bool;
+    3] = [true, false, true];
+    let prescribed: [f64;
+    3] = [0.0, 0.0, 0.0];
+    let applied: Result<u64, MechanicsError> = apply_dirichlet_constraints_f64(
+            3, span(constrained), span(prescribed), span(stiffness), span(load));
+
+    match (applied) {
+        Ok(n) => { assert(n == 3); }
+        Err(error) => { assert(false); }
+    }
+
+    let mut x: [f64;
+    3] = [0.0, 0.0, 0.0];
+    let mut r: [f64;
+    3] = [0.0, 0.0, 0.0];
+    let mut p: [f64;
+    3] = [0.0, 0.0, 0.0];
+    let mut ap: [f64;
+    3] = [0.0, 0.0, 0.0];
+    let solved: Result<CGReport, MechanicsError> = solve_spd_system_f64(
+            3, span(stiffness), span(load), span(x), span(r), span(p), span(ap),
+            20, 1.0e-12);
+
+    match (solved) {
+        Ok(report) => { assert(report.converged); }
+        Err(error) => { assert(false); }
+    }
+
     assert(fabs(x[1] - 2.5e-7) < 1.0e-12);
 }
 
 @test fn engineering_vector_norm_is_scaled_and_stable() {
     let vector: Vector3 = Vector3 { x: 1.0e308, y: 1.0e308, z: 0.0 };
     let result: Result<f64, MechanicsError> = norm3(vector);
-    match (result) { Ok(value) => { assert(value > 1.4e308 && value < 1.42e308); } Err(error) => { assert(false); } }
+
+    match (result) {
+        Ok(value) => { assert(value > 1.4e308 && value < 1.42e308); }
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn three_dimensional_truss_stiffness_is_symmetric() {
-    let mut stiffness: [f64; 36] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut stiffness: [f64;
+    36] = [
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
     let result: Result<u64, MechanicsError> = truss_element_stiffness_3d(
-        0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 200.0e9, 0.01, span(stiffness));
-    match (result) { Ok(n) => { assert(n == 36); } Err(error) => { assert(false); } }
-    for (row in 0..6) { for (col in 0..6) { assert(fabs(stiffness[row * 6 + col] - stiffness[col * 6 + row]) < 1.0e-6); } }
+            0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 200.0e9, 0.01, span(stiffness));
+
+    match (result) {
+        Ok(n) => { assert(n == 36); }
+        Err(error) => { assert(false); }
+    }
+
+    for (row in 0..6) {
+        for (col in 0..6) {
+            assert(fabs(stiffness[row * 6 + col] - stiffness[col * 6 + row]) < 1.0e-6);
+        }
+    }
 }
 
 @test fn principal_and_three_dimensional_von_mises_stresses_are_correct() {
-    let state: PlaneStress2D = PlaneStress2D { sigma_x_pa: 100.0e6, sigma_y_pa: 0.0, tau_xy_pa: 0.0 };
-    let principal: Result<PrincipalStress2D, MechanicsError> = plane_stress_principal_f64(state);
-    match (principal) { Ok(result) => { assert(fabs(result.maximum_pa - 100.0e6) < 1.0); assert(fabs(result.minimum_pa) < 1.0); } Err(error) => { assert(false); } }
-    let full: Stress3D = Stress3D { sigma_x_pa: 100.0e6, sigma_y_pa: 0.0, sigma_z_pa: 0.0, tau_xy_pa: 0.0, tau_yz_pa: 0.0, tau_zx_pa: 0.0 };
+    let state: PlaneStress2D = PlaneStress2D {
+        sigma_x_pa: 100.0e6, sigma_y_pa: 0.0, tau_xy_pa: 0.0
+    };
+
+    let principal: Result<PrincipalStress2D, MechanicsError> =
+        plane_stress_principal_f64(state);
+
+    match (principal) {
+        Ok(result) => {
+            assert(fabs(result.maximum_pa - 100.0e6) < 1.0);
+            assert(fabs(result.minimum_pa) < 1.0);
+        }
+
+        Err(error) => { assert(false); }
+    }
+
+    let full: Stress3D = Stress3D {
+        sigma_x_pa: 100.0e6, sigma_y_pa: 0.0, sigma_z_pa: 0.0, tau_xy_pa: 0.0,
+        tau_yz_pa: 0.0, tau_zx_pa: 0.0
+    };
+
     let equivalent: Result<f64, MechanicsError> = von_mises_3d_f64(full);
-    match (equivalent) { Ok(value) => { assert(fabs(value - 100.0e6) < 1.0); } Err(error) => { assert(false); } }
+
+    match (equivalent) {
+        Ok(value) => { assert(fabs(value - 100.0e6) < 1.0); }
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn si_dimensions_distinguish_current_amount_and_luminous_intensity() {
-    let ampere: QuantitySI = QuantitySI { value: 1.0, length_power: 0, mass_power: 0, time_power: 0, current_power: 1, temperature_power: 0, amount_power: 0, luminous_intensity_power: 0 };
-    let mole: QuantitySI = QuantitySI { value: 1.0, length_power: 0, mass_power: 0, time_power: 0, current_power: 0, temperature_power: 0, amount_power: 1, luminous_intensity_power: 0 };
-    let candela: QuantitySI = QuantitySI { value: 1.0, length_power: 0, mass_power: 0, time_power: 0, current_power: 0, temperature_power: 0, amount_power: 0, luminous_intensity_power: 1 };
-    let current_plus_mole: Result<QuantitySI, MechanicsError> = quantity_add_si(ampere, mole);
-    let mole_plus_candela: Result<QuantitySI, MechanicsError> = quantity_add_si(mole, candela);
-    match (current_plus_mole) { Ok(value) => { assert(false); } Err(MechanicsDimensionMismatch) => { assert(true); } Err(error) => { assert(false); } }
-    match (mole_plus_candela) { Ok(value) => { assert(false); } Err(MechanicsDimensionMismatch) => { assert(true); } Err(error) => { assert(false); } }
+    let ampere: QuantitySI = QuantitySI {
+        value: 1.0, length_power: 0, mass_power: 0, time_power: 0,
+        current_power: 1, temperature_power: 0, amount_power: 0,
+        luminous_intensity_power: 0
+    };
+
+    let mole: QuantitySI = QuantitySI {
+        value: 1.0, length_power: 0, mass_power: 0, time_power: 0,
+        current_power: 0, temperature_power: 0, amount_power: 1,
+        luminous_intensity_power: 0
+    };
+
+    let candela: QuantitySI = QuantitySI {
+        value: 1.0, length_power: 0, mass_power: 0, time_power: 0,
+        current_power: 0, temperature_power: 0, amount_power: 0,
+        luminous_intensity_power: 1
+    };
+
+    let current_plus_mole: Result<QuantitySI, MechanicsError> = quantity_add_si(
+            ampere, mole);
+    let mole_plus_candela: Result<QuantitySI, MechanicsError> = quantity_add_si(
+            mole, candela);
+
+    match (current_plus_mole) {
+        Ok(value) => { assert(false); }
+        Err(MechanicsDimensionMismatch) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+
+    match (mole_plus_candela) {
+        Ok(value) => { assert(false); }
+        Err(MechanicsDimensionMismatch) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+
     assert(milliamperes(250.0) == 0.25);
 }
 
 @test fn vector_normalisation_rejects_zero_and_returns_unit_length() {
     let value: Vector3 = Vector3 { x: 3.0, y: 4.0, z: 0.0 };
     let unit: Result<Vector3, MechanicsError> = normalise3(value);
+
     match (unit) {
         Ok(result) => {
             let result_norm: Result<f64, MechanicsError> = norm3(result);
-            match (result_norm) { Ok(length) => { assert(fabs(length - 1.0) < 1.0e-12); } Err(error) => { assert(false); } }
+            match (result_norm) {
+                Ok(length) => { assert(fabs(length - 1.0) < 1.0e-12); }
+                Err(error) => { assert(false); }
+            }
         }
+
         Err(error) => { assert(false); }
     }
+
     let zero: Vector2 = Vector2 { x: 0.0, y: 0.0 };
     let invalid: Result<Vector2, MechanicsError> = normalise2(zero);
-    match (invalid) { Ok(result) => { assert(false); } Err(InvalidGeometry) => { assert(true); } Err(error) => { assert(false); } }
+
+    match (invalid) {
+        Ok(result) => { assert(false); }
+        Err(InvalidGeometry) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
 }
 
-
 @test fn stress_invariants_are_scaled_for_large_finite_values() {
-    let plane: PlaneStress2D = PlaneStress2D { sigma_x_pa: 1.0e200, sigma_y_pa: 0.0, tau_xy_pa: 0.0 };
+    let plane: PlaneStress2D = PlaneStress2D {
+        sigma_x_pa: 1.0e200, sigma_y_pa: 0.0, tau_xy_pa: 0.0
+    };
+
     let vm2: Result<f64, MechanicsError> = plane_stress_von_mises_f64(plane);
-    match (vm2) { Ok(value) => { assert(fabs(value / 1.0e200 - 1.0) < 1.0e-12); } Err(error) => { assert(false); } }
-    let full: Stress3D = Stress3D { sigma_x_pa: 1.0e200, sigma_y_pa: 0.0, sigma_z_pa: 0.0, tau_xy_pa: 0.0, tau_yz_pa: 0.0, tau_zx_pa: 0.0 };
+
+    match (vm2) {
+        Ok(value) => { assert(fabs(value / 1.0e200 - 1.0) < 1.0e-12); }
+        Err(error) => { assert(false); }
+    }
+
+    let full: Stress3D = Stress3D {
+        sigma_x_pa: 1.0e200, sigma_y_pa: 0.0, sigma_z_pa: 0.0, tau_xy_pa: 0.0,
+        tau_yz_pa: 0.0, tau_zx_pa: 0.0
+    };
+
     let vm3: Result<f64, MechanicsError> = von_mises_3d_f64(full);
-    match (vm3) { Ok(value) => { assert(fabs(value / 1.0e200 - 1.0) < 1.0e-12); } Err(error) => { assert(false); } }
+
+    match (vm3) {
+        Ok(value) => { assert(fabs(value / 1.0e200 - 1.0) < 1.0e-12); }
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn truss_geometry_norm_avoids_squaring_large_coordinates() {
-    let mut stiffness: [f64; 16] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-    let result: Result<u64, MechanicsError> = truss_element_stiffness_2d(0.0, 0.0, 1.0e150, 1.0e150, 200.0e9, 0.01, span(stiffness));
-    match (result) { Ok(n) => { assert(n == 16); } Err(error) => { assert(false); } }
+    let mut stiffness: [f64;
+    16] = [
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0];
+    let result: Result<u64, MechanicsError> = truss_element_stiffness_2d(
+            0.0, 0.0, 1.0e150, 1.0e150, 200.0e9, 0.01, span(stiffness));
+
+    match (result) {
+        Ok(n) => { assert(n == 16); }
+        Err(error) => { assert(false); }
+    }
 }
 
 @test fn imported_numerics_error_variants_resolve_alongside_mechanics_errors() {
-    let values: [f64; 2] = [1.6e308, 1.6e308];
+    let values: [f64;
+    2] = [1.6e308, 1.6e308];
     let result: Result<f64, NumericsError> = norm2_f64(span(values));
+
     match (result) {
         Ok(value) => { assert(false); }
         Err(NonFiniteResult) => { assert(true); }
         Err(error) => { assert(false); }
     }
 }
-
 
 @test fn global_truss_assembles_solves_and_matches_statics() {
     // Classic determinate three-bar triangle: pin at (0,0), roller at (4,0),
@@ -203,68 +430,122 @@ import freshet_numerics;
     let element_count: u64 = 3;
     let dofs: u64 = 6;
     let entries: u64 = 48;
-    let coordinates: [f64; 6] = [0.0, 0.0, 4.0, 0.0, 2.0, 1.0];
-    let connectivity: [u64; 6] = [0, 2, 1, 2, 0, 1];
-    let youngs: [f64; 3] = [200.0e9, 200.0e9, 200.0e9];
-    let areas: [f64; 3] = [1.0e-3, 1.0e-3, 1.0e-3];
+    let coordinates: [f64;
+    6] = [0.0, 0.0, 4.0, 0.0, 2.0, 1.0];
+    let connectivity: [u64;
+    6] = [0, 2, 1, 2, 0, 1];
+    let youngs: [f64;
+    3] = [200.0e9, 200.0e9, 200.0e9];
+    let areas: [f64;
+    3] = [1.0e-3, 1.0e-3, 1.0e-3];
     let rows: *u64 = malloc(u64, entries);
     let cols: *u64 = malloc(u64, entries);
     let values: *f64 = malloc(f64, entries);
     let lengths: *f64 = malloc(f64, element_count);
-    defer free(rows); defer free(cols); defer free(values); defer free(lengths);
+    defer free(rows);
+    defer free(cols);
+    defer free(values);
+    defer free(lengths);
     let assembled: Result<u64, MechanicsError> = assemble_global_truss_2d(
-        node_count, element_count, span(coordinates), span(connectivity),
-        span(youngs), span(areas), span(rows, entries), span(cols, entries),
-        span(values, entries), span(lengths, element_count));
-    match (assembled) { Ok(count) => { assert(count == 48); } Err(error) => { assert(false); } }
-    assert(fabs(lengths[0] - sqrt(5.0)) < 1.0e-12 && fabs(lengths[2] - 4.0) < 1.0e-12);
+            node_count, element_count, span(coordinates), span(connectivity),
+            span(youngs), span(areas), span(rows, entries), span(cols, entries),
+            span(values, entries), span(lengths, element_count));
+
+    match (assembled) {
+        Ok(count) => { assert(count == 48); }
+        Err(error) => { assert(false); }
+    }
+
+    assert(fabs(lengths[0] - sqrt(5.0)) < 1.0e-12 &&
+        fabs(lengths[2] - 4.0) < 1.0e-12);
     // COO -> CSR
     let offsets: *u64 = malloc(u64, dofs + 1);
     let csr_cols: *u64 = malloc(u64, entries);
     let csr_values: *f64 = malloc(f64, entries);
     let cursor: *u64 = malloc(u64, dofs);
-    defer free(offsets); defer free(csr_cols); defer free(csr_values); defer free(cursor);
+    defer free(offsets);
+    defer free(csr_cols);
+    defer free(csr_values);
+    defer free(cursor);
     let converted: Result<u64, NumericsError> = freshet_numerics::coo_to_csr_f64(
-        dofs, dofs, span(rows, entries), span(cols, entries), span(values, entries),
-        span(offsets, dofs + 1), span(csr_cols, entries), span(csr_values, entries), span(cursor, dofs));
-    match (converted) { Ok(nnz) => { assert(nnz == 48); } Err(error) => { assert(false); } }
+            dofs, dofs, span(rows, entries), span(cols, entries),
+            span(values, entries), span(offsets, dofs + 1),
+            span(csr_cols, entries), span(csr_values, entries),
+            span(cursor, dofs));
+
+    match (converted) {
+        Ok(nnz) => { assert(nnz == 48); }
+        Err(error) => { assert(false); }
+    }
+
     let matrix: CSRMatrixF64 = CSRMatrixF64 {
-        rows: dofs, cols: dofs, nnz: 48,
-        row_offsets: span(offsets, dofs + 1),
-        col_indices: span(csr_cols, entries),
-        values: span(csr_values, entries)
+        rows: dofs, cols: dofs, nnz: 48, row_offsets: span(offsets, dofs + 1),
+        col_indices: span(csr_cols, entries), values: span(csr_values, entries)
     };
+
     // the assembled global stiffness must be symmetric
-    let symmetric: Result<bool, NumericsError> = freshet_numerics::csr_is_symmetric_f64(matrix);
-    match (symmetric) { Ok(value) => { assert(value); } Err(error) => { assert(false); } }
+    let symmetric: Result<bool, NumericsError> =
+        freshet_numerics::csr_is_symmetric_f64(matrix);
+
+    match (symmetric) {
+        Ok(value) => { assert(value); }
+        Err(error) => { assert(false); }
+    }
+
     // loads and supports
-    let mut load: [f64; 6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut load: [f64;
+    6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
     load[5] = 0.0 - 1000.0;
-    let constrained: [bool; 6] = [true, true, false, true, false, false];
-    let prescribed: [f64; 6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-    let applied: Result<u64, MechanicsError> = apply_sparse_dirichlet_constraints_f64(
-        dofs, span(constrained), span(prescribed), matrix, span(load));
-    match (applied) { Ok(n) => { assert(n == 6); } Err(error) => { assert(false); } }
+    let constrained: [bool;
+    6] = [true, true, false, true, false, false];
+    let prescribed: [f64;
+    6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let applied: Result<u64, MechanicsError> =
+        apply_sparse_dirichlet_constraints_f64(
+            dofs, span(constrained), span(prescribed), matrix, span(load));
+
+    match (applied) {
+        Ok(n) => { assert(n == 6); }
+        Err(error) => { assert(false); }
+    }
+
     // sparse PCG solve
-    let mut x: [f64; 6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-    let mut residual: [f64; 6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-    let mut z: [f64; 6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-    let mut direction: [f64; 6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-    let mut product: [f64; 6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-    let mut inverse_diagonal: [f64; 6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut x: [f64;
+    6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut residual: [f64;
+    6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut z: [f64;
+    6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut direction: [f64;
+    6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut product: [f64;
+    6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut inverse_diagonal: [f64;
+    6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
     let solved: Result<CGReport, MechanicsError> = solve_sparse_system_pcg_f64(
-        matrix, span(load), span(x), span(residual), span(z), span(direction), span(product),
-        span(inverse_diagonal), 200, 1.0e-12);
-    match (solved) { Ok(report) => { assert(report.converged); } Err(error) => { assert(false); } }
+            matrix, span(load), span(x), span(residual), span(z),
+            span(direction), span(product), span(inverse_diagonal), 200,
+            1.0e-12);
+
+    match (solved) {
+        Ok(report) => { assert(report.converged); }
+        Err(error) => { assert(false); }
+    }
+
     // Castigliano apex displacement: -P(5*sqrt(5)/2 + 4)/(EA)
-    let expected: f64 = 0.0 - 1000.0 * (2.5 * sqrt(5.0) + 4.0) / (200.0e9 * 1.0e-3);
+    let expected: f64 = 0.0 - 1000.0 * (2.5 * sqrt(5.0) + 4.0) /
+        (200.0e9 * 1.0e-3);
     assert(fabs(x[5] - expected) < 1.0e-12);
     // element post-processing: axial forces match statics
     let inclined: f64 = 0.0 - 1000.0 * sqrt(5.0) / 2.0;
     let mut element_index: u64 = 0;
+
     while (element_index < 3) {
-        let results: Result<TrussElementResults, MechanicsError> = element_axial_results_2d(
-            span(coordinates), span(connectivity), span(x), span(youngs), span(areas), element_index);
+        let results: Result<TrussElementResults, MechanicsError> =
+            element_axial_results_2d(
+                span(coordinates), span(connectivity), span(x), span(youngs),
+                span(areas), element_index);
+
         match (results) {
             Ok(found) => {
                 if (element_index == 2) {
@@ -274,25 +555,41 @@ import freshet_numerics;
                 } else {
                     assert(fabs(found.axial_force_n - inclined) < 1.0e-6);
                     assert(fabs(found.axial_stress_pa - inclined / 1.0e-3) < 1.0);
-                    assert(fabs(found.axial_strain - inclined / (200.0e9 * 1.0e-3)) < 1.0e-11);
+                    assert(fabs(found.axial_strain - inclined /
+                        (200.0e9 * 1.0e-3)) < 1.0e-11);
                 }
+
                 assert(fabs(found.length_m - lengths[element_index]) < 1.0e-12);
             }
+
             Err(error) => { assert(false); }
         }
+
         element_index = element_index + 1;
     }
+
     // support reactions and equilibrium
-    let mut reactions: [f64; 6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut reactions: [f64;
+    6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
     let reacted: Result<u64, MechanicsError> = support_reactions_f64(
-        dofs, matrix, span(x), span(load), span(constrained), span(reactions));
-    match (reacted) { Ok(n) => { assert(n == 6); } Err(error) => { assert(false); } }
+            dofs, matrix, span(x), span(load), span(constrained),
+            span(reactions));
+
+    match (reacted) {
+        Ok(n) => { assert(n == 6); }
+        Err(error) => { assert(false); }
+    }
+
     assert(fabs(reactions[1] - 500.0) < 1.0e-9);
     assert(fabs(reactions[3] - 500.0) < 1.0e-9);
     assert(fabs(reactions[0]) < 1.0e-9);
-    let mut scratch: [f64; 6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-    let equilibrium: Result<EquilibriumReport, MechanicsError> = equilibrium_check_2d(
-        node_count, matrix, span(x), span(load), span(constrained), span(reactions), span(scratch), 1.0e-9);
+    let mut scratch: [f64;
+    6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let equilibrium: Result<EquilibriumReport, MechanicsError> =
+        equilibrium_check_2d(
+            node_count, matrix, span(x), span(load), span(constrained),
+            span(reactions), span(scratch), 1.0e-9);
+
     match (equilibrium) {
         Ok(report) => {
             assert(report.equilibrium_ok);
@@ -300,6 +597,7 @@ import freshet_numerics;
             assert(fabs(report.load_reaction_sum_y) < 1.0e-9);
             assert(report.residual_norm < 1.0e-9);
         }
+
         Err(error) => { assert(false); }
     }
 }
@@ -307,31 +605,60 @@ import freshet_numerics;
 @test fn sparse_constraints_install_identity_rows_or_report_singular() {
     // off-diagonal-only CSR: constraining dof 0 leaves its row without a
     // diagonal entry, so the identity row cannot be installed.
-    let offsets: [u64; 3] = [0, 1, 2];
-    let columns: [u64; 2] = [1, 0];
-    let values: [f64; 2] = [3.0, 4.0];
+    let offsets: [u64;
+    3] = [0, 1, 2];
+    let columns: [u64;
+    2] = [1, 0];
+    let values: [f64;
+    2] = [3.0, 4.0];
+
     let matrix: CSRMatrixF64 = CSRMatrixF64 {
-        rows: 2, cols: 2, nnz: 2,
-        row_offsets: span(offsets), col_indices: span(columns), values: span(values)
+        rows: 2, cols: 2, nnz: 2, row_offsets: span(offsets),
+        col_indices: span(columns), values: span(values)
     };
-    let constrained: [bool; 2] = [true, false];
-    let prescribed: [f64; 2] = [0.0, 0.0];
-    let mut load: [f64; 2] = [1.0, 2.0];
-    let singular: Result<u64, MechanicsError> = apply_sparse_dirichlet_constraints_f64(
-        2, span(constrained), span(prescribed), matrix, span(load));
-    match (singular) { Ok(n) => { assert(false); } Err(SingularSystem) => { assert(true); } Err(error) => { assert(false); } }
+
+    let constrained: [bool;
+    2] = [true, false];
+    let prescribed: [f64;
+    2] = [0.0, 0.0];
+    let mut load: [f64;
+    2] = [1.0, 2.0];
+    let singular: Result<u64, MechanicsError> =
+        apply_sparse_dirichlet_constraints_f64(
+            2, span(constrained), span(prescribed), matrix, span(load));
+
+    match (singular) {
+        Ok(n) => { assert(false); }
+        Err(SingularSystem) => { assert(true); }
+        Err(error) => { assert(false); }
+    }
+
     // a truss-like row with a diagonal succeeds and installs the identity row
-    let tridiagonal_offsets: [u64; 3] = [0, 2, 4];
-    let tridiagonal_columns: [u64; 4] = [0, 1, 0, 1];
-    let mut tridiagonal_values: [f64; 4] = [4.0, 1.0, 1.0, 3.0];
+    let tridiagonal_offsets: [u64;
+    3] = [0, 2, 4];
+    let tridiagonal_columns: [u64;
+    4] = [0, 1, 0, 1];
+    let mut tridiagonal_values: [f64;
+    4] = [4.0, 1.0, 1.0, 3.0];
+
     let tridiagonal: CSRMatrixF64 = CSRMatrixF64 {
-        rows: 2, cols: 2, nnz: 4,
-        row_offsets: span(tridiagonal_offsets), col_indices: span(tridiagonal_columns), values: span(tridiagonal_values)
+        rows: 2, cols: 2, nnz: 4, row_offsets: span(tridiagonal_offsets),
+        col_indices: span(tridiagonal_columns),
+        values: span(tridiagonal_values)
     };
-    let mut second_load: [f64; 2] = [7.0, 8.0];
-    let installed: Result<u64, MechanicsError> = apply_sparse_dirichlet_constraints_f64(
-        2, span(constrained), span(prescribed), tridiagonal, span(second_load));
-    match (installed) { Ok(n) => { assert(n == 2); } Err(error) => { assert(false); } }
+
+    let mut second_load: [f64;
+    2] = [7.0, 8.0];
+    let installed: Result<u64, MechanicsError> =
+        apply_sparse_dirichlet_constraints_f64(
+            2, span(constrained), span(prescribed), tridiagonal,
+            span(second_load));
+
+    match (installed) {
+        Ok(n) => { assert(n == 2); }
+        Err(error) => { assert(false); }
+    }
+
     // row 0 is now the identity equation with load = prescribed
     assert(tridiagonal_values[0] == 1.0 && tridiagonal_values[1] == 0.0);
     assert(second_load[0] == 0.0);
@@ -349,40 +676,69 @@ import freshet_numerics;
     let dofs: u64 = 12;
     let entries: u64 = 108;
     let coordinates: *f64 = malloc(f64, 12);
-    let connectivity: [u64; 6] = [0, 3, 1, 3, 2, 3];
-    let youngs: [f64; 3] = [70.0e9, 70.0e9, 70.0e9];
-    let areas: [f64; 3] = [5.0e-4, 5.0e-4, 5.0e-4];
+    let connectivity: [u64;
+    6] = [0, 3, 1, 3, 2, 3];
+    let youngs: [f64;
+    3] = [70.0e9, 70.0e9, 70.0e9];
+    let areas: [f64;
+    3] = [5.0e-4, 5.0e-4, 5.0e-4];
     let rows: *u64 = malloc(u64, entries);
     let cols: *u64 = malloc(u64, entries);
     let values: *f64 = malloc(f64, entries);
     let lengths: *f64 = malloc(f64, element_count);
-    defer free(coordinates); defer free(rows); defer free(cols);
-    defer free(values); defer free(lengths);
-    coordinates[0] = 0.0; coordinates[1] = 0.0; coordinates[2] = 0.0;
-    coordinates[3] = 2.0; coordinates[4] = 0.0; coordinates[5] = 0.0;
-    coordinates[6] = 1.0; coordinates[7] = sqrt(3.0); coordinates[8] = 0.0;
-    coordinates[9] = 1.0; coordinates[10] = sqrt(3.0) / 3.0; coordinates[11] = 2.0;
+    defer free(coordinates);
+    defer free(rows);
+    defer free(cols);
+    defer free(values);
+    defer free(lengths);
+    coordinates[0] = 0.0;
+    coordinates[1] = 0.0;
+    coordinates[2] = 0.0;
+    coordinates[3] = 2.0;
+    coordinates[4] = 0.0;
+    coordinates[5] = 0.0;
+    coordinates[6] = 1.0;
+    coordinates[7] = sqrt(3.0);
+    coordinates[8] = 0.0;
+    coordinates[9] = 1.0;
+    coordinates[10] = sqrt(3.0) / 3.0;
+    coordinates[11] = 2.0;
     let assembled: Result<u64, MechanicsError> = assemble_global_truss_3d(
-        node_count, element_count, span(coordinates, 12), span(connectivity),
-        span(youngs), span(areas), span(rows, entries), span(cols, entries),
-        span(values, entries), span(lengths, element_count));
-    match (assembled) { Ok(count) => { assert(count == 108); } Err(error) => { assert(false); } }
+            node_count, element_count, span(coordinates, 12),
+            span(connectivity), span(youngs), span(areas), span(rows, entries),
+            span(cols, entries), span(values, entries),
+            span(lengths, element_count));
+
+    match (assembled) {
+        Ok(count) => { assert(count == 108); }
+        Err(error) => { assert(false); }
+    }
+
     assert(fabs(lengths[0] - 4.0 / sqrt(3.0)) < 1.0e-12);
     let offsets: *u64 = malloc(u64, dofs + 1);
     let csr_cols: *u64 = malloc(u64, entries);
     let csr_values: *f64 = malloc(f64, entries);
     let cursor: *u64 = malloc(u64, dofs);
-    defer free(offsets); defer free(csr_cols); defer free(csr_values); defer free(cursor);
+    defer free(offsets);
+    defer free(csr_cols);
+    defer free(csr_values);
+    defer free(cursor);
     let converted: Result<u64, NumericsError> = freshet_numerics::coo_to_csr_f64(
-        dofs, dofs, span(rows, entries), span(cols, entries), span(values, entries),
-        span(offsets, dofs + 1), span(csr_cols, entries), span(csr_values, entries), span(cursor, dofs));
-    match (converted) { Ok(nnz) => { assert(nnz == 108); } Err(error) => { assert(false); } }
+            dofs, dofs, span(rows, entries), span(cols, entries),
+            span(values, entries), span(offsets, dofs + 1),
+            span(csr_cols, entries), span(csr_values, entries),
+            span(cursor, dofs));
+
+    match (converted) {
+        Ok(nnz) => { assert(nnz == 108); }
+        Err(error) => { assert(false); }
+    }
+
     let matrix: CSRMatrixF64 = CSRMatrixF64 {
-        rows: dofs, cols: dofs, nnz: 108,
-        row_offsets: span(offsets, dofs + 1),
-        col_indices: span(csr_cols, entries),
-        values: span(csr_values, entries)
+        rows: dofs, cols: dofs, nnz: 108, row_offsets: span(offsets, dofs + 1),
+        col_indices: span(csr_cols, entries), values: span(csr_values, entries)
     };
+
     let load: *f64 = malloc(f64, dofs);
     let constrained: *bool = malloc(bool, dofs);
     let prescribed: *f64 = malloc(f64, dofs);
@@ -394,48 +750,88 @@ import freshet_numerics;
     let inverse_diagonal: *f64 = malloc(f64, dofs);
     let reactions: *f64 = malloc(f64, dofs);
     let scratch: *f64 = malloc(f64, dofs);
-    defer free(load); defer free(constrained); defer free(prescribed);
-    defer free(displacement); defer free(residual); defer free(z);
-    defer free(direction); defer free(product); defer free(inverse_diagonal);
-    defer free(reactions); defer free(scratch);
-    for (i in 0..dofs) { load[i] = 0.0; prescribed[i] = 0.0; displacement[i] = 0.0; }
+    defer free(load);
+    defer free(constrained);
+    defer free(prescribed);
+    defer free(displacement);
+    defer free(residual);
+    defer free(z);
+    defer free(direction);
+    defer free(product);
+    defer free(inverse_diagonal);
+    defer free(reactions);
+    defer free(scratch);
+
+    for (i in 0..dofs) {
+        load[i] = 0.0;
+        prescribed[i] = 0.0;
+        displacement[i] = 0.0;
+    }
+
     load[11] = 0.0 - 5000.0;
     for (i in 0..9) { constrained[i] = true; }
     for (i in 9..dofs) { constrained[i] = false; }
-    let applied: Result<u64, MechanicsError> = apply_sparse_dirichlet_constraints_f64(
-        dofs, span(constrained, dofs), span(prescribed, dofs), matrix, span(load, dofs));
-    match (applied) { Ok(n) => { assert(n == 12); } Err(error) => { assert(false); } }
+    let applied: Result<u64, MechanicsError> =
+        apply_sparse_dirichlet_constraints_f64(
+            dofs, span(constrained, dofs), span(prescribed, dofs), matrix,
+            span(load, dofs));
+
+    match (applied) {
+        Ok(n) => { assert(n == 12); }
+        Err(error) => { assert(false); }
+    }
+
     let solved: Result<CGReport, MechanicsError> = solve_sparse_system_pcg_f64(
-        matrix, span(load, dofs), span(displacement, dofs), span(residual, dofs), span(z, dofs),
-        span(direction, dofs), span(product, dofs), span(inverse_diagonal, dofs), 400, 1.0e-10);
-    match (solved) { Ok(report) => { assert(report.converged); } Err(error) => { assert(false); } }
+            matrix, span(load, dofs), span(displacement, dofs),
+            span(residual, dofs), span(z, dofs), span(direction, dofs),
+            span(product, dofs), span(inverse_diagonal, dofs), 400, 1.0e-10);
+
+    match (solved) {
+        Ok(report) => { assert(report.converged); }
+        Err(error) => { assert(false); }
+    }
+
     // apex settlement (Castigliano, linear theory)
-    let expected: f64 = 0.0 - 3.0 * (2.0 * sqrt(3.0) * 5000.0 / 9.0) * (2.0 * sqrt(3.0) * 5000.0 / 9.0) *
-        (4.0 / sqrt(3.0)) / (5000.0 * 70.0e9 * 5.0e-4);
+    let expected: f64 = 0.0 - 3.0 * (2.0 * sqrt(3.0) * 5000.0 / 9.0) *
+        (2.0 * sqrt(3.0) * 5000.0 / 9.0) * (4.0 / sqrt(3.0)) /
+        (5000.0 * 70.0e9 * 5.0e-4);
     assert(fabs(displacement[11] - expected) < 1.0e-12);
     // element post-processing: symmetric compression in every bar
     let bar_force: f64 = 0.0 - 2.0 * sqrt(3.0) * 5000.0 / 9.0;
+
     for (element in 0..element_count) {
-        let results: Result<TrussElementResults, MechanicsError> = element_axial_results_3d(
-            span(coordinates, 12), span(connectivity), span(displacement, dofs),
-            span(youngs), span(areas), element);
+        let results: Result<TrussElementResults, MechanicsError> =
+            element_axial_results_3d(
+                span(coordinates, 12), span(connectivity),
+                span(displacement, dofs), span(youngs), span(areas), element);
+
         match (results) {
             Ok(found) => {
                 assert(fabs(found.axial_force_n - bar_force) < 1.0e-6);
                 assert(fabs(found.axial_stress_pa - bar_force / 5.0e-4) < 1.0);
                 assert(fabs(found.axial_strain - bar_force / (70.0e9 * 5.0e-4)) < 1.0e-12);
             }
+
             Err(error) => { assert(false); }
         }
     }
+
     // support reactions and 3D equilibrium
     let reacted: Result<u64, MechanicsError> = support_reactions_f64(
-        dofs, matrix, span(displacement, dofs), span(load, dofs),
-        span(constrained, dofs), span(reactions, dofs));
-    match (reacted) { Ok(n) => { assert(n == 12); } Err(error) => { assert(false); } }
-    let equilibrium: Result<EquilibriumReport, MechanicsError> = equilibrium_check_3d(
-        node_count, matrix, span(displacement, dofs), span(load, dofs),
-        span(constrained, dofs), span(reactions, dofs), span(scratch, dofs), 1.0e-9);
+            dofs, matrix, span(displacement, dofs), span(load, dofs),
+            span(constrained, dofs), span(reactions, dofs));
+
+    match (reacted) {
+        Ok(n) => { assert(n == 12); }
+        Err(error) => { assert(false); }
+    }
+
+    let equilibrium: Result<EquilibriumReport, MechanicsError> =
+        equilibrium_check_3d(
+            node_count, matrix, span(displacement, dofs), span(load, dofs),
+            span(constrained, dofs), span(reactions, dofs), span(scratch, dofs),
+            1.0e-9);
+
     match (equilibrium) {
         Ok(report) => {
             assert(report.equilibrium_ok);
@@ -443,6 +839,7 @@ import freshet_numerics;
             assert(fabs(report.load_reaction_sum_y) < 1.0e-9);
             assert(fabs(report.load_reaction_sum_z) < 1.0e-9);
         }
+
         Err(error) => { assert(false); }
     }
 }

@@ -11,4 +11,6 @@ import stress;
 import fem;
 import structural;
 
-pub fn version() -> str { return "0.3.0"; }
+pub fn version() -> str {
+    return "0.3.0";
+}

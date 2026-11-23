@@ -8,43 +8,92 @@ pub fn truss_element_stiffness_2d(
     stiffness: Span<f64>
 ) -> Result<u64, MechanicsError> {
     if (stiffness.len != 16) { return Err(MechanicsDimensionMismatch); }
-    if (!mechanics_finite_f64(x1) || !mechanics_finite_f64(y1) || !mechanics_finite_f64(x2) ||
-        !mechanics_finite_f64(y2) || !mechanics_finite_f64(young_modulus_pa) || !mechanics_finite_f64(area_m2)) { return Err(MechanicsNonFiniteInput); }
-    if (young_modulus_pa <= 0.0 || area_m2 <= 0.0) { return Err(InvalidMaterial); }
-    let dx: f64 = x2 - x1; let dy: f64 = y2 - y1;
-    if (!mechanics_finite_f64(dx) || !mechanics_finite_f64(dy)) { return Err(MechanicsNonFiniteResult); }
+
+    if (!mechanics_finite_f64(x1) || !mechanics_finite_f64(y1) ||
+        !mechanics_finite_f64(x2) || !mechanics_finite_f64(y2) ||
+        !mechanics_finite_f64(young_modulus_pa) ||
+        !mechanics_finite_f64(area_m2)) { return Err(MechanicsNonFiniteInput); }
+
+    if (young_modulus_pa <= 0.0 || area_m2 <= 0.0) {
+        return Err(InvalidMaterial);
+    }
+
+    let dx: f64 = x2 - x1;
+    let dy: f64 = y2 - y1;
+
+    if (!mechanics_finite_f64(dx) || !mechanics_finite_f64(dy)) {
+        return Err(MechanicsNonFiniteResult);
+    }
+
     let length: f64 = norm2(Vector2 { x: dx, y: dy })?;
     if (length <= 0.0) { return Err(InvalidGeometry); }
-    let c: f64 = dx / length; let s: f64 = dy / length;
+    let c: f64 = dx / length;
+    let s: f64 = dy / length;
     let factor: f64 = young_modulus_pa * area_m2 / length;
-    let cc: f64 = factor * c * c; let ss: f64 = factor * s * s; let cs: f64 = factor * c * s;
+    let cc: f64 = factor * c * c;
+    let ss: f64 = factor * s * s;
+    let cs: f64 = factor * c * s;
     let mut k: *f64 = stiffness.ptr;
-    k[0] = cc; k[1] = cs; k[2] = 0.0 - cc; k[3] = 0.0 - cs;
-    k[4] = cs; k[5] = ss; k[6] = 0.0 - cs; k[7] = 0.0 - ss;
-    k[8] = 0.0 - cc; k[9] = 0.0 - cs; k[10] = cc; k[11] = cs;
-    k[12] = 0.0 - cs; k[13] = 0.0 - ss; k[14] = cs; k[15] = ss;
-    for (i in 0..16) { if (!mechanics_finite_f64(k[i])) { return Err(MechanicsNonFiniteResult); } }
+    k[0] = cc;
+    k[1] = cs;
+    k[2] = 0.0 - cc;
+    k[3] = 0.0 - cs;
+    k[4] = cs;
+    k[5] = ss;
+    k[6] = 0.0 - cs;
+    k[7] = 0.0 - ss;
+    k[8] = 0.0 - cc;
+    k[9] = 0.0 - cs;
+    k[10] = cc;
+    k[11] = cs;
+    k[12] = 0.0 - cs;
+    k[13] = 0.0 - ss;
+    k[14] = cs;
+    k[15] = ss;
+
+    for (i in 0..16) {
+        if (!mechanics_finite_f64(k[i])) {
+            return Err(MechanicsNonFiniteResult);
+        }
+    }
+
     return Ok(16);
 }
 
 // Global-coordinate 3D two-node truss element stiffness, row-major 6x6.
 pub fn truss_element_stiffness_3d(
-    x1: f64, y1: f64, z1: f64, x2: f64, y2: f64, z2: f64,
-    young_modulus_pa: f64, area_m2: f64, stiffness: Span<f64>
+    x1: f64, y1: f64, z1: f64, x2: f64, y2: f64, z2: f64, young_modulus_pa: f64,
+    area_m2: f64, stiffness: Span<f64>
 ) -> Result<u64, MechanicsError> {
     if (stiffness.len != 36) { return Err(MechanicsDimensionMismatch); }
-    if (!mechanics_finite_f64(x1) || !mechanics_finite_f64(y1) || !mechanics_finite_f64(z1) ||
-        !mechanics_finite_f64(x2) || !mechanics_finite_f64(y2) || !mechanics_finite_f64(z2) ||
-        !mechanics_finite_f64(young_modulus_pa) || !mechanics_finite_f64(area_m2)) { return Err(MechanicsNonFiniteInput); }
-    if (young_modulus_pa <= 0.0 || area_m2 <= 0.0) { return Err(InvalidMaterial); }
-    let dx: f64 = x2 - x1; let dy: f64 = y2 - y1; let dz: f64 = z2 - z1;
-    if (!mechanics_finite_f64(dx) || !mechanics_finite_f64(dy) || !mechanics_finite_f64(dz)) { return Err(MechanicsNonFiniteResult); }
+
+    if (!mechanics_finite_f64(x1) || !mechanics_finite_f64(y1) ||
+        !mechanics_finite_f64(z1) || !mechanics_finite_f64(x2) ||
+        !mechanics_finite_f64(y2) || !mechanics_finite_f64(z2) ||
+        !mechanics_finite_f64(young_modulus_pa) ||
+        !mechanics_finite_f64(area_m2)) { return Err(MechanicsNonFiniteInput); }
+
+    if (young_modulus_pa <= 0.0 || area_m2 <= 0.0) {
+        return Err(InvalidMaterial);
+    }
+
+    let dx: f64 = x2 - x1;
+    let dy: f64 = y2 - y1;
+    let dz: f64 = z2 - z1;
+
+    if (!mechanics_finite_f64(dx) || !mechanics_finite_f64(dy) ||
+        !mechanics_finite_f64(dz)) { return Err(MechanicsNonFiniteResult); }
+
     let length: f64 = norm3(Vector3 { x: dx, y: dy, z: dz })?;
     if (length <= 0.0) { return Err(InvalidGeometry); }
-    let l: f64 = dx / length; let m: f64 = dy / length; let n: f64 = dz / length;
+    let l: f64 = dx / length;
+    let m: f64 = dy / length;
+    let n: f64 = dz / length;
     let factor: f64 = young_modulus_pa * area_m2 / length;
-    let mut direction: [f64; 3] = [l, m, n];
+    let mut direction: [f64;
+    3] = [l, m, n];
     let mut k: *f64 = stiffness.ptr;
+
     for (row in 0..3) {
         for (col in 0..3) {
             let value: f64 = factor * direction[row] * direction[col];
@@ -54,26 +103,44 @@ pub fn truss_element_stiffness_3d(
             k[(row + 3) * 6 + col] = 0.0 - value;
         }
     }
-    for (i in 0..36) { if (!mechanics_finite_f64(k[i])) { return Err(MechanicsNonFiniteResult); } }
+
+    for (i in 0..36) {
+        if (!mechanics_finite_f64(k[i])) {
+            return Err(MechanicsNonFiniteResult);
+        }
+    }
+
     return Ok(36);
 }
 
 pub fn truss_axial_force_2d(
-    x1: f64, y1: f64, x2: f64, y2: f64,
-    ux1: f64, uy1: f64, ux2: f64, uy2: f64,
+    x1: f64, y1: f64, x2: f64, y2: f64, ux1: f64, uy1: f64, ux2: f64, uy2: f64,
     young_modulus_pa: f64, area_m2: f64
 ) -> Result<f64, MechanicsError> {
-    if (!mechanics_finite_f64(x1) || !mechanics_finite_f64(y1) || !mechanics_finite_f64(x2) ||
-        !mechanics_finite_f64(y2) || !mechanics_finite_f64(ux1) || !mechanics_finite_f64(uy1) ||
+    if (!mechanics_finite_f64(x1) || !mechanics_finite_f64(y1) ||
+        !mechanics_finite_f64(x2) || !mechanics_finite_f64(y2) ||
+        !mechanics_finite_f64(ux1) || !mechanics_finite_f64(uy1) ||
         !mechanics_finite_f64(ux2) || !mechanics_finite_f64(uy2) ||
-        !mechanics_finite_f64(young_modulus_pa) || !mechanics_finite_f64(area_m2)) { return Err(MechanicsNonFiniteInput); }
-    let dx: f64 = x2 - x1; let dy: f64 = y2 - y1;
-    if (!mechanics_finite_f64(dx) || !mechanics_finite_f64(dy)) { return Err(MechanicsNonFiniteResult); }
+        !mechanics_finite_f64(young_modulus_pa) ||
+        !mechanics_finite_f64(area_m2)) { return Err(MechanicsNonFiniteInput); }
+
+    let dx: f64 = x2 - x1;
+    let dy: f64 = y2 - y1;
+
+    if (!mechanics_finite_f64(dx) || !mechanics_finite_f64(dy)) {
+        return Err(MechanicsNonFiniteResult);
+    }
+
     let length: f64 = norm2(Vector2 { x: dx, y: dy })?;
     if (length <= 0.0) { return Err(InvalidGeometry); }
-    if (young_modulus_pa <= 0.0 || area_m2 <= 0.0) { return Err(InvalidMaterial); }
+
+    if (young_modulus_pa <= 0.0 || area_m2 <= 0.0) {
+        return Err(InvalidMaterial);
+    }
+
     if (!mechanics_finite_f64(length)) { return Err(MechanicsNonFiniteResult); }
-    let c: f64 = dx / length; let s: f64 = dy / length;
+    let c: f64 = dx / length;
+    let s: f64 = dy / length;
     let extension: f64 = (ux2 - ux1) * c + (uy2 - uy1) * s;
     let force: f64 = young_modulus_pa * area_m2 * extension / length;
     if (!mechanics_finite_f64(force)) { return Err(MechanicsNonFiniteResult); }

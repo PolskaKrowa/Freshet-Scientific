@@ -1,35 +1,28 @@
 module stress;
 import mechanics_common;
 
-pub struct PlaneStress2D {
-    sigma_x_pa: f64,
-    sigma_y_pa: f64,
-    tau_xy_pa: f64
-}
+pub struct PlaneStress2D { sigma_x_pa: f64, sigma_y_pa: f64, tau_xy_pa: f64 }
 
-pub struct PlaneStressStrain2D {
-    epsilon_x: f64,
-    epsilon_y: f64,
-    gamma_xy: f64
-}
+pub struct PlaneStressStrain2D { epsilon_x: f64, epsilon_y: f64, gamma_xy: f64 }
 
 pub struct PrincipalStress2D {
-    maximum_pa: f64,
-    minimum_pa: f64,
-    maximum_shear_pa: f64
+    maximum_pa: f64, minimum_pa: f64, maximum_shear_pa: f64
 }
 
 pub struct Stress3D {
-    sigma_x_pa: f64,
-    sigma_y_pa: f64,
-    sigma_z_pa: f64,
-    tau_xy_pa: f64,
-    tau_yz_pa: f64,
-    tau_zx_pa: f64
+    sigma_x_pa: f64, sigma_y_pa: f64, sigma_z_pa: f64, tau_xy_pa: f64,
+    tau_yz_pa: f64, tau_zx_pa: f64
 }
 
-pub fn plane_stress_von_mises_f64(stress: PlaneStress2D) -> Result<f64, MechanicsError> {
-    if (!mechanics_finite_f64(stress.sigma_x_pa) || !mechanics_finite_f64(stress.sigma_y_pa) || !mechanics_finite_f64(stress.tau_xy_pa)) { return Err(MechanicsNonFiniteInput); }
+pub fn plane_stress_von_mises_f64(
+    stress: PlaneStress2D
+) -> Result<f64, MechanicsError> {
+    if (!mechanics_finite_f64(stress.sigma_x_pa) ||
+        !mechanics_finite_f64(stress.sigma_y_pa) ||
+        !mechanics_finite_f64(stress.tau_xy_pa)) {
+        return Err(MechanicsNonFiniteInput);
+    }
+
     let mut scale: f64 = fabs(stress.sigma_x_pa);
     if (fabs(stress.sigma_y_pa) > scale) { scale = fabs(stress.sigma_y_pa); }
     if (fabs(stress.tau_xy_pa) > scale) { scale = fabs(stress.tau_xy_pa); }
@@ -38,34 +31,60 @@ pub fn plane_stress_von_mises_f64(stress: PlaneStress2D) -> Result<f64, Mechanic
     let sy: f64 = stress.sigma_y_pa / scale;
     let tau: f64 = stress.tau_xy_pa / scale;
     let square_scaled: f64 = sx * sx - sx * sy + sy * sy + 3.0 * tau * tau;
-    if (!mechanics_finite_f64(square_scaled) || square_scaled < 0.0) { return Err(MechanicsNonFiniteResult); }
+
+    if (!mechanics_finite_f64(square_scaled) || square_scaled < 0.0) {
+        return Err(MechanicsNonFiniteResult);
+    }
+
     let result: f64 = scale * sqrt(square_scaled);
     if (!mechanics_finite_f64(result)) { return Err(MechanicsNonFiniteResult); }
     return Ok(result);
 }
 
-pub fn plane_stress_principal_f64(stress: PlaneStress2D) -> Result<PrincipalStress2D, MechanicsError> {
-    if (!mechanics_finite_f64(stress.sigma_x_pa) || !mechanics_finite_f64(stress.sigma_y_pa) || !mechanics_finite_f64(stress.tau_xy_pa)) { return Err(MechanicsNonFiniteInput); }
+pub fn plane_stress_principal_f64(
+    stress: PlaneStress2D
+) -> Result<PrincipalStress2D, MechanicsError> {
+    if (!mechanics_finite_f64(stress.sigma_x_pa) ||
+        !mechanics_finite_f64(stress.sigma_y_pa) ||
+        !mechanics_finite_f64(stress.tau_xy_pa)) {
+        return Err(MechanicsNonFiniteInput);
+    }
+
     let average: f64 = 0.5 * stress.sigma_x_pa + 0.5 * stress.sigma_y_pa;
     let difference: f64 = 0.5 * stress.sigma_x_pa - 0.5 * stress.sigma_y_pa;
     let mut scale: f64 = fabs(difference);
     if (fabs(stress.tau_xy_pa) > scale) { scale = fabs(stress.tau_xy_pa); }
     let mut radius: f64 = 0.0;
+
     if (scale > 0.0) {
         let normalised_difference: f64 = difference / scale;
         let normalised_shear: f64 = stress.tau_xy_pa / scale;
-        radius = scale * sqrt(normalised_difference * normalised_difference + normalised_shear * normalised_shear);
+        radius = scale *
+            sqrt(normalised_difference * normalised_difference +
+            normalised_shear * normalised_shear);
     }
+
     let maximum: f64 = average + radius;
     let minimum: f64 = average - radius;
-    if (!mechanics_finite_f64(maximum) || !mechanics_finite_f64(minimum) || !mechanics_finite_f64(radius)) { return Err(MechanicsNonFiniteResult); }
-    return Ok(PrincipalStress2D { maximum_pa: maximum, minimum_pa: minimum, maximum_shear_pa: radius });
+
+    if (!mechanics_finite_f64(maximum) || !mechanics_finite_f64(minimum) ||
+        !mechanics_finite_f64(radius)) { return Err(MechanicsNonFiniteResult); }
+
+    return Ok(PrincipalStress2D {
+        maximum_pa: maximum, minimum_pa: minimum, maximum_shear_pa: radius
+    });
 }
 
 pub fn von_mises_3d_f64(stress: Stress3D) -> Result<f64, MechanicsError> {
-    if (!mechanics_finite_f64(stress.sigma_x_pa) || !mechanics_finite_f64(stress.sigma_y_pa) ||
-        !mechanics_finite_f64(stress.sigma_z_pa) || !mechanics_finite_f64(stress.tau_xy_pa) ||
-        !mechanics_finite_f64(stress.tau_yz_pa) || !mechanics_finite_f64(stress.tau_zx_pa)) { return Err(MechanicsNonFiniteInput); }
+    if (!mechanics_finite_f64(stress.sigma_x_pa) ||
+        !mechanics_finite_f64(stress.sigma_y_pa) ||
+        !mechanics_finite_f64(stress.sigma_z_pa) ||
+        !mechanics_finite_f64(stress.tau_xy_pa) ||
+        !mechanics_finite_f64(stress.tau_yz_pa) ||
+        !mechanics_finite_f64(stress.tau_zx_pa)) {
+        return Err(MechanicsNonFiniteInput);
+    }
+
     let mut scale: f64 = fabs(stress.sigma_x_pa);
     if (fabs(stress.sigma_y_pa) > scale) { scale = fabs(stress.sigma_y_pa); }
     if (fabs(stress.sigma_z_pa) > scale) { scale = fabs(stress.sigma_z_pa); }
@@ -73,13 +92,22 @@ pub fn von_mises_3d_f64(stress: Stress3D) -> Result<f64, MechanicsError> {
     if (fabs(stress.tau_yz_pa) > scale) { scale = fabs(stress.tau_yz_pa); }
     if (fabs(stress.tau_zx_pa) > scale) { scale = fabs(stress.tau_zx_pa); }
     if (scale == 0.0) { return Ok(0.0); }
-    let sx: f64 = stress.sigma_x_pa / scale; let sy: f64 = stress.sigma_y_pa / scale;
-    let sz: f64 = stress.sigma_z_pa / scale; let txy: f64 = stress.tau_xy_pa / scale;
-    let tyz: f64 = stress.tau_yz_pa / scale; let tzx: f64 = stress.tau_zx_pa / scale;
-    let dx: f64 = sx - sy; let dy: f64 = sy - sz; let dz: f64 = sz - sx;
-    let square_scaled: f64 = 0.5 * (dx * dx + dy * dy + dz * dz) +
-                             3.0 * (txy * txy + tyz * tyz + tzx * tzx);
-    if (!mechanics_finite_f64(square_scaled) || square_scaled < 0.0) { return Err(MechanicsNonFiniteResult); }
+    let sx: f64 = stress.sigma_x_pa / scale;
+    let sy: f64 = stress.sigma_y_pa / scale;
+    let sz: f64 = stress.sigma_z_pa / scale;
+    let txy: f64 = stress.tau_xy_pa / scale;
+    let tyz: f64 = stress.tau_yz_pa / scale;
+    let tzx: f64 = stress.tau_zx_pa / scale;
+    let dx: f64 = sx - sy;
+    let dy: f64 = sy - sz;
+    let dz: f64 = sz - sx;
+    let square_scaled: f64 = 0.5 * (dx * dx + dy * dy + dz * dz) + 3.0 *
+        (txy * txy + tyz * tyz + tzx * tzx);
+
+    if (!mechanics_finite_f64(square_scaled) || square_scaled < 0.0) {
+        return Err(MechanicsNonFiniteResult);
+    }
+
     let result: f64 = scale * sqrt(square_scaled);
     if (!mechanics_finite_f64(result)) { return Err(MechanicsNonFiniteResult); }
     return Ok(result);
@@ -88,15 +116,31 @@ pub fn von_mises_3d_f64(stress: Stress3D) -> Result<f64, MechanicsError> {
 pub fn plane_stress_to_strain_f64(
     stress: PlaneStress2D, young_modulus_pa: f64, poisson_ratio: f64
 ) -> Result<PlaneStressStrain2D, MechanicsError> {
-    if (!mechanics_finite_f64(young_modulus_pa) || !mechanics_finite_f64(poisson_ratio) ||
-        !mechanics_finite_f64(stress.sigma_x_pa) || !mechanics_finite_f64(stress.sigma_y_pa) || !mechanics_finite_f64(stress.tau_xy_pa)) { return Err(MechanicsNonFiniteInput); }
-    if (young_modulus_pa <= 0.0 || poisson_ratio <= -1.0 || poisson_ratio >= 0.5) { return Err(InvalidMaterial); }
+    if (!mechanics_finite_f64(young_modulus_pa) ||
+        !mechanics_finite_f64(poisson_ratio) ||
+        !mechanics_finite_f64(stress.sigma_x_pa) ||
+        !mechanics_finite_f64(stress.sigma_y_pa) ||
+        !mechanics_finite_f64(stress.tau_xy_pa)) {
+        return Err(MechanicsNonFiniteInput);
+    }
+
+    if (young_modulus_pa <= 0.0 || poisson_ratio <= -1.0 || poisson_ratio >= 0.5) {
+        return Err(InvalidMaterial);
+    }
+
     let sigma_x_over_e: f64 = stress.sigma_x_pa / young_modulus_pa;
     let sigma_y_over_e: f64 = stress.sigma_y_pa / young_modulus_pa;
     let tau_over_e: f64 = stress.tau_xy_pa / young_modulus_pa;
     let epsilon_x: f64 = sigma_x_over_e - poisson_ratio * sigma_y_over_e;
     let epsilon_y: f64 = sigma_y_over_e - poisson_ratio * sigma_x_over_e;
     let gamma_xy: f64 = 2.0 * (1.0 + poisson_ratio) * tau_over_e;
-    if (!mechanics_finite_f64(epsilon_x) || !mechanics_finite_f64(epsilon_y) || !mechanics_finite_f64(gamma_xy)) { return Err(MechanicsNonFiniteResult); }
-    return Ok(PlaneStressStrain2D { epsilon_x: epsilon_x, epsilon_y: epsilon_y, gamma_xy: gamma_xy });
+
+    if (!mechanics_finite_f64(epsilon_x) || !mechanics_finite_f64(epsilon_y) ||
+        !mechanics_finite_f64(gamma_xy)) {
+        return Err(MechanicsNonFiniteResult);
+    }
+
+    return Ok(PlaneStressStrain2D {
+        epsilon_x: epsilon_x, epsilon_y: epsilon_y, gamma_xy: gamma_xy
+    });
 }

@@ -2,25 +2,39 @@ module beams;
 import mechanics_common;
 
 pub struct BeamResponse {
-    maximum_shear_n: f64,
-    maximum_moment_nm: f64,
-    maximum_deflection_m: f64
+    maximum_shear_n: f64, maximum_moment_nm: f64, maximum_deflection_m: f64
 }
 
 // Simply supported beam with a full-span uniformly distributed load w [N/m].
 pub fn simply_supported_udl_f64(
-    load_n_per_m: f64, span_m: f64, young_modulus_pa: f64, second_moment_m4: f64
+    load_n_per_m: f64, span_m: f64, young_modulus_pa: f64,
+    second_moment_m4: f64
 ) -> Result<BeamResponse, MechanicsError> {
     if (!mechanics_finite_f64(load_n_per_m) || !mechanics_finite_f64(span_m) ||
-        !mechanics_finite_f64(young_modulus_pa) || !mechanics_finite_f64(second_moment_m4)) { return Err(MechanicsNonFiniteInput); }
-    if (span_m <= 0.0 || young_modulus_pa <= 0.0 || second_moment_m4 <= 0.0) { return Err(InvalidGeometry); }
+        !mechanics_finite_f64(young_modulus_pa) ||
+        !mechanics_finite_f64(second_moment_m4)) {
+        return Err(MechanicsNonFiniteInput);
+    }
+
+    if (span_m <= 0.0 || young_modulus_pa <= 0.0 || second_moment_m4 <= 0.0) {
+        return Err(InvalidGeometry);
+    }
+
     let magnitude: f64 = fabs(load_n_per_m);
     let shear: f64 = magnitude * span_m * 0.5;
     let moment: f64 = magnitude * span_m * span_m / 8.0;
     let deflection: f64 = 5.0 * magnitude * span_m * span_m * span_m * span_m /
-                          (384.0 * young_modulus_pa * second_moment_m4);
-    if (!mechanics_finite_f64(shear) || !mechanics_finite_f64(moment) || !mechanics_finite_f64(deflection)) { return Err(MechanicsNonFiniteResult); }
-    return Ok(BeamResponse { maximum_shear_n: shear, maximum_moment_nm: moment, maximum_deflection_m: deflection });
+        (384.0 * young_modulus_pa * second_moment_m4);
+
+    if (!mechanics_finite_f64(shear) || !mechanics_finite_f64(moment) ||
+        !mechanics_finite_f64(deflection)) {
+        return Err(MechanicsNonFiniteResult);
+    }
+
+    return Ok(BeamResponse {
+        maximum_shear_n: shear, maximum_moment_nm: moment,
+        maximum_deflection_m: deflection
+    });
 }
 
 // Cantilever with a point load at its free end.
@@ -28,11 +42,27 @@ pub fn cantilever_end_load_f64(
     load_n: f64, length_m: f64, young_modulus_pa: f64, second_moment_m4: f64
 ) -> Result<BeamResponse, MechanicsError> {
     if (!mechanics_finite_f64(load_n) || !mechanics_finite_f64(length_m) ||
-        !mechanics_finite_f64(young_modulus_pa) || !mechanics_finite_f64(second_moment_m4)) { return Err(MechanicsNonFiniteInput); }
-    if (length_m <= 0.0 || young_modulus_pa <= 0.0 || second_moment_m4 <= 0.0) { return Err(InvalidGeometry); }
+        !mechanics_finite_f64(young_modulus_pa) ||
+        !mechanics_finite_f64(second_moment_m4)) {
+        return Err(MechanicsNonFiniteInput);
+    }
+
+    if (length_m <= 0.0 || young_modulus_pa <= 0.0 || second_moment_m4 <= 0.0) {
+        return Err(InvalidGeometry);
+    }
+
     let shear: f64 = fabs(load_n);
     let moment: f64 = fabs(load_n) * length_m;
-    let deflection: f64 = fabs(load_n) * length_m * length_m * length_m / (3.0 * young_modulus_pa * second_moment_m4);
-    if (!mechanics_finite_f64(shear) || !mechanics_finite_f64(moment) || !mechanics_finite_f64(deflection)) { return Err(MechanicsNonFiniteResult); }
-    return Ok(BeamResponse { maximum_shear_n: shear, maximum_moment_nm: moment, maximum_deflection_m: deflection });
+    let deflection: f64 = fabs(load_n) * length_m * length_m * length_m /
+        (3.0 * young_modulus_pa * second_moment_m4);
+
+    if (!mechanics_finite_f64(shear) || !mechanics_finite_f64(moment) ||
+        !mechanics_finite_f64(deflection)) {
+        return Err(MechanicsNonFiniteResult);
+    }
+
+    return Ok(BeamResponse {
+        maximum_shear_n: shear, maximum_moment_nm: moment,
+        maximum_deflection_m: deflection
+    });
 }

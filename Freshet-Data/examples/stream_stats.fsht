@@ -2,12 +2,20 @@ import freshet_data;
 
 fn main() {
     let result: Result<StatsF64, DataError> = scan_f64_lines("values.txt");
+
     match (result) {
         Ok(stats) => {
-            print("count = "); print_u64(stats.count); println();
-            print("mean = "); print_f64(stats.mean, 6); println();
-            print("variance = "); print_f64(stats.variance, 6); println();
+            print("count = ");
+            print_u64(stats.count);
+            println();
+            print("mean = ");
+            print_f64(stats.mean, 6);
+            println();
+            print("variance = ");
+            print_f64(stats.variance, 6);
+            println();
         }
+
         Err(error) => { print("could not scan values.txt"); println(); }
     }
 }

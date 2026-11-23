@@ -2,48 +2,93 @@ module vectors;
 import mechanics_common;
 
 pub struct Vector2 { x: f64, y: f64 }
+
 pub struct Vector3 { x: f64, y: f64, z: f64 }
 
 pub fn vector2(x: f64, y: f64) -> Result<Vector2, MechanicsError> {
-    if (!mechanics_finite_f64(x) || !mechanics_finite_f64(y)) { return Err(MechanicsNonFiniteInput); }
+    if (!mechanics_finite_f64(x) || !mechanics_finite_f64(y)) {
+        return Err(MechanicsNonFiniteInput);
+    }
+
     return Ok(Vector2 { x: x, y: y });
 }
 
 pub fn vector3(x: f64, y: f64, z: f64) -> Result<Vector3, MechanicsError> {
-    if (!mechanics_finite_f64(x) || !mechanics_finite_f64(y) || !mechanics_finite_f64(z)) { return Err(MechanicsNonFiniteInput); }
+    if (!mechanics_finite_f64(x) || !mechanics_finite_f64(y) ||
+        !mechanics_finite_f64(z)) { return Err(MechanicsNonFiniteInput); }
+
     return Ok(Vector3 { x: x, y: y, z: z });
 }
 
-pub fn add2(a: Vector2, b: Vector2) -> Vector2 { return Vector2 { x: a.x + b.x, y: a.y + b.y }; }
-pub fn subtract2(a: Vector2, b: Vector2) -> Vector2 { return Vector2 { x: a.x - b.x, y: a.y - b.y }; }
-pub fn scale2(a: Vector2, scale: f64) -> Vector2 { return Vector2 { x: a.x * scale, y: a.y * scale }; }
-pub fn dot2(a: Vector2, b: Vector2) -> f64 { return a.x * b.x + a.y * b.y; }
-pub fn cross2_z(a: Vector2, b: Vector2) -> f64 { return a.x * b.y - a.y * b.x; }
+pub fn add2(a: Vector2, b: Vector2) -> Vector2 {
+    return Vector2 { x: a.x + b.x, y: a.y + b.y };
+}
+
+pub fn subtract2(a: Vector2, b: Vector2) -> Vector2 {
+    return Vector2 { x: a.x - b.x, y: a.y - b.y };
+}
+
+pub fn scale2(a: Vector2, scale: f64) -> Vector2 {
+    return Vector2 { x: a.x * scale, y: a.y * scale };
+}
+
+pub fn dot2(a: Vector2, b: Vector2) -> f64 {
+    return a.x * b.x + a.y * b.y;
+}
+
+pub fn cross2_z(a: Vector2, b: Vector2) -> f64 {
+    return a.x * b.y - a.y * b.x;
+}
+
 pub fn norm2(a: Vector2) -> Result<f64, MechanicsError> {
-    if (!mechanics_finite_f64(a.x) || !mechanics_finite_f64(a.y)) { return Err(MechanicsNonFiniteInput); }
+    if (!mechanics_finite_f64(a.x) || !mechanics_finite_f64(a.y)) {
+        return Err(MechanicsNonFiniteInput);
+    }
+
     let mut scale: f64 = fabs(a.x);
     if (fabs(a.y) > scale) { scale = fabs(a.y); }
     if (scale == 0.0) { return Ok(0.0); }
-    let nx: f64 = a.x / scale; let ny: f64 = a.y / scale;
+    let nx: f64 = a.x / scale;
+    let ny: f64 = a.y / scale;
     let result: f64 = scale * sqrt(nx * nx + ny * ny);
     if (!mechanics_finite_f64(result)) { return Err(MechanicsNonFiniteResult); }
     return Ok(result);
 }
 
-pub fn add3(a: Vector3, b: Vector3) -> Vector3 { return Vector3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }; }
-pub fn subtract3(a: Vector3, b: Vector3) -> Vector3 { return Vector3 { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }; }
-pub fn scale3(a: Vector3, scale: f64) -> Vector3 { return Vector3 { x: a.x * scale, y: a.y * scale, z: a.z * scale }; }
-pub fn dot3(a: Vector3, b: Vector3) -> f64 { return a.x * b.x + a.y * b.y + a.z * b.z; }
-pub fn cross3(a: Vector3, b: Vector3) -> Vector3 {
-    return Vector3 { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x };
+pub fn add3(a: Vector3, b: Vector3) -> Vector3 {
+    return Vector3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
 }
+
+pub fn subtract3(a: Vector3, b: Vector3) -> Vector3 {
+    return Vector3 { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+}
+
+pub fn scale3(a: Vector3, scale: f64) -> Vector3 {
+    return Vector3 { x: a.x * scale, y: a.y * scale, z: a.z * scale };
+}
+
+pub fn dot3(a: Vector3, b: Vector3) -> f64 {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+pub fn cross3(a: Vector3, b: Vector3) -> Vector3 {
+    return Vector3 {
+        x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x
+    };
+}
+
 pub fn norm3(a: Vector3) -> Result<f64, MechanicsError> {
-    if (!mechanics_finite_f64(a.x) || !mechanics_finite_f64(a.y) || !mechanics_finite_f64(a.z)) { return Err(MechanicsNonFiniteInput); }
+    if (!mechanics_finite_f64(a.x) || !mechanics_finite_f64(a.y) ||
+        !mechanics_finite_f64(a.z)) { return Err(MechanicsNonFiniteInput); }
+
     let mut scale: f64 = fabs(a.x);
     if (fabs(a.y) > scale) { scale = fabs(a.y); }
     if (fabs(a.z) > scale) { scale = fabs(a.z); }
     if (scale == 0.0) { return Ok(0.0); }
-    let nx: f64 = a.x / scale; let ny: f64 = a.y / scale; let nz: f64 = a.z / scale;
+    let nx: f64 = a.x / scale;
+    let ny: f64 = a.y / scale;
+    let nz: f64 = a.z / scale;
     let result: f64 = scale * sqrt(nx * nx + ny * ny + nz * nz);
     if (!mechanics_finite_f64(result)) { return Err(MechanicsNonFiniteResult); }
     return Ok(result);

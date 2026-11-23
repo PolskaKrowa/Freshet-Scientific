@@ -3,62 +3,38 @@
 module freshet_numerics;
 
 pub enum NumericsError {
-    DimensionMismatch,
-    SizeOverflow,
-    InvalidDimension,
-    InvalidTolerance,
-    NotPositiveDefinite,
-    NonFiniteInput,
-    NonFiniteResult,
-    InvalidCSR,
-    InvalidIndex,
-    InvalidPreconditioner,
-    SolverBreakdown
+    DimensionMismatch, SizeOverflow, InvalidDimension, InvalidTolerance,
+    NotPositiveDefinite, NonFiniteInput, NonFiniteResult, InvalidCSR,
+    InvalidIndex, InvalidPreconditioner, SolverBreakdown
 }
 
-pub struct CGReport {
-    iterations: u64,
-    residual_norm: f64,
-    converged: bool
-}
+pub struct CGReport { iterations: u64, residual_norm: f64, converged: bool }
 
-pub struct KrylovReport {
-    iterations: u64,
-    residual_norm: f64,
-    converged: bool
-}
+pub struct KrylovReport { iterations: u64, residual_norm: f64, converged: bool }
 
 // A row-major dense matrix view. The backing span remains caller-owned.
-pub struct DenseMatrixF64 {
-    rows: u64,
-    cols: u64,
-    values: Span<f64>
-}
+pub struct DenseMatrixF64 { rows: u64, cols: u64, values: Span<f64> }
 
 // Compressed sparse row (CSR) matrix view. Rows are represented by
 // row_offsets[0..rows+1]; columns and values have exactly nnz entries.
 // Duplicate columns are permitted and are accumulated by matvec.
 pub struct CSRMatrixF64 {
-    rows: u64,
-    cols: u64,
-    nnz: u64,
-    row_offsets: Span<u64>,
-    col_indices: Span<u64>,
-    values: Span<f64>
+    rows: u64, cols: u64, nnz: u64, row_offsets: Span<u64>,
+    col_indices: Span<u64>, values: Span<f64>
 }
 
-pub struct JacobiPreconditionerF64 {
-    inverse_diagonal: Span<f64>
-}
+pub struct JacobiPreconditionerF64 { inverse_diagonal: Span<f64> }
 
 // User-defined types implement this trait to supply y = A*x without
 // materialising A. Static dispatch keeps the hot call visible to Penstock.
 pub trait LinearOperatorF64 {
-    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsError>;
+    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) ->
+        Result<u64, NumericsError>;
 }
 
 pub trait PreconditionerF64 {
-    fn apply(preconditioner: Self, residual: Span<f64>, output: Span<f64>) -> Result<u64, NumericsError>;
+    fn apply(preconditioner: Self, residual: Span<f64>, output: Span<f64>) ->
+        Result<u64, NumericsError>;
 }
 
 fn finite_f64(value: f64) -> bool {
@@ -77,13 +53,17 @@ fn validate_finite_span(values: Span<f64>) -> Result<u64, NumericsError> {
     for (i in 0..values.len) {
         if (!finite_f64(values.ptr[i])) { return Err(NonFiniteInput); }
     }
+
     return Ok(values.len);
 }
 
-fn validate_finite_result_span(values: Span<f64>) -> Result<u64, NumericsError> {
+fn validate_finite_result_span(
+    values: Span<f64>
+) -> Result<u64, NumericsError> {
     for (i in 0..values.len) {
         if (!finite_f64(values.ptr[i])) { return Err(NonFiniteResult); }
     }
+
     return Ok(values.len);
 }
 
@@ -92,9 +72,11 @@ pub fn dot_f64(a: Span<f64>, b: Span<f64>) -> Result<f64, NumericsError> {
     validate_finite_span(a)?;
     validate_finite_span(b)?;
     let mut sum: f64 = 0.0;
-    @reproducible parfor (i in 0..a.len) [reduction(+:sum)] {
+
+    @reproducible parfor (i in 0..a.len)[reduction(+: sum)] {
         sum = sum + a.ptr[i] * b.ptr[i];
     }
+
     if (!finite_f64(sum)) { return Err(NonFiniteResult); }
     return Ok(sum);
 }
@@ -104,10 +86,12 @@ pub fn dot_f64(a: Span<f64>, b: Span<f64>) -> Result<f64, NumericsError> {
 pub fn norm2_f64(values: Span<f64>) -> Result<f64, NumericsError> {
     let mut scale: f64 = 0.0;
     let mut sum_squares: f64 = 1.0;
+
     for (i in 0..values.len) {
         let value: f64 = values.ptr[i];
         if (!finite_f64(value)) { return Err(NonFiniteInput); }
         let absolute: f64 = fabs(value);
+
         if (absolute > 0.0) {
             if (scale < absolute) {
                 let ratio: f64 = scale / absolute;
@@ -119,6 +103,7 @@ pub fn norm2_f64(values: Span<f64>) -> Result<f64, NumericsError> {
             }
         }
     }
+
     if (scale == 0.0) { return Ok(0.0); }
     let result: f64 = scale * sqrt(sum_squares);
     if (!finite_f64(result)) { return Err(NonFiniteResult); }
@@ -132,7 +117,9 @@ pub fn fill_f64(output: Span<f64>, value: f64) -> Result<u64, NumericsError> {
     return Ok(output.len);
 }
 
-pub fn scale_f64(alpha: f64, input: Span<f64>, output: Span<f64>) -> Result<u64, NumericsError> {
+pub fn scale_f64(
+    alpha: f64, input: Span<f64>, output: Span<f64>
+) -> Result<u64, NumericsError> {
     if (input.len != output.len) { return Err(DimensionMismatch); }
     if (!finite_f64(alpha)) { return Err(NonFiniteInput); }
     validate_finite_span(input)?;
@@ -145,9 +132,11 @@ pub fn scale_f64(alpha: f64, input: Span<f64>, output: Span<f64>) -> Result<u64,
 pub fn sum_f64(input: Span<f64>) -> Result<f64, NumericsError> {
     validate_finite_span(input)?;
     let mut total: f64 = 0.0;
-    @reproducible parfor (i in 0..input.len) [reduction(+:total)] {
+
+    @reproducible parfor (i in 0..input.len)[reduction(+: total)] {
         total = total + input.ptr[i];
     }
+
     if (!finite_f64(total)) { return Err(NonFiniteResult); }
     return Ok(total);
 }
@@ -160,15 +149,19 @@ pub fn max_f64(input: Span<f64>) -> Result<f64, NumericsError> {
     // not provide, so this kernel avoids that construct until the reference
     // compiler emits llvm.maxnum/llvm.minimum for the backend matrix.
     let mut maximum: f64 = input.ptr[0];
+
     for (i in 0..input.len) {
         if (input.ptr[i] > maximum) { maximum = input.ptr[i]; }
     }
+
     return Ok(maximum);
 }
 
 // In-place BLAS-1 update: y <- alpha*x + y. Exact aliasing is supported;
 // arbitrary partial overlap is not.
-pub fn axpy_f64(alpha: f64, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsError> {
+pub fn axpy_f64(
+    alpha: f64, x: Span<f64>, y: Span<f64>
+) -> Result<u64, NumericsError> {
     if (x.len != y.len) { return Err(DimensionMismatch); }
     if (!finite_f64(alpha)) { return Err(NonFiniteInput); }
     validate_finite_span(x)?;
@@ -179,41 +172,58 @@ pub fn axpy_f64(alpha: f64, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsE
     return Ok(x.len);
 }
 
-pub fn matvec_f64(n: u64, a: Span<f64>, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsError> {
+pub fn matvec_f64(
+    n: u64, a: Span<f64>, x: Span<f64>, y: Span<f64>
+) -> Result<u64, NumericsError> {
     if (n == 0) { return Err(InvalidDimension); }
     let required: u64 = checked_product_size(checked_mul(n, n))?;
-    if (a.len != required || x.len != n || y.len != n) { return Err(DimensionMismatch); }
+
+    if (a.len != required || x.len != n || y.len != n) {
+        return Err(DimensionMismatch);
+    }
+
     validate_finite_span(a)?;
     validate_finite_span(x)?;
     let mut y_ptr: *f64 = y.ptr;
+
     parfor (row in 0..n) {
         let mut sum: f64 = 0.0;
         for (col in 0..n) { sum = sum + a.ptr[row * n + col] * x.ptr[col]; }
         y_ptr[row] = sum;
     }
+
     validate_finite_result_span(y)?;
     return Ok(n);
 }
 
 pub fn matmul_f64(
-    m: u64, k: u64, n: u64,
-    a: Span<f64>, b: Span<f64>, c: Span<f64>
+    m: u64, k: u64, n: u64, a: Span<f64>, b: Span<f64>, c: Span<f64>
 ) -> Result<u64, NumericsError> {
     if (m == 0 || k == 0 || n == 0) { return Err(InvalidDimension); }
     let a_required: u64 = checked_product_size(checked_mul(m, k))?;
     let b_required: u64 = checked_product_size(checked_mul(k, n))?;
     let c_required: u64 = checked_product_size(checked_mul(m, n))?;
-    if (a.len != a_required || b.len != b_required || c.len != c_required) { return Err(DimensionMismatch); }
+
+    if (a.len != a_required || b.len != b_required || c.len != c_required) {
+        return Err(DimensionMismatch);
+    }
+
     validate_finite_span(a)?;
     validate_finite_span(b)?;
     let mut c_ptr: *f64 = c.ptr;
+
     parfor (row in 0..m) {
         for (col in 0..n) {
             let mut sum: f64 = 0.0;
-            for (inner in 0..k) { sum = sum + a.ptr[row * k + inner] * b.ptr[inner * n + col]; }
+
+            for (inner in 0..k) {
+                sum = sum + a.ptr[row * k + inner] * b.ptr[inner * n + col];
+            }
+
             c_ptr[row * n + col] = sum;
         }
     }
+
     validate_finite_result_span(c)?;
     return Ok(c_required);
 }
@@ -221,40 +231,59 @@ pub fn matmul_f64(
 // Cache-blocked row-major matrix product. Rows are distributed across workers;
 // the k/column tiles improve reuse of each A row and B tile in the cache.
 pub fn blocked_matmul_f64(
-    m: u64, k: u64, n: u64, tile_size: u64,
-    a: Span<f64>, b: Span<f64>, c: Span<f64>
+    m: u64, k: u64, n: u64, tile_size: u64, a: Span<f64>, b: Span<f64>,
+    c: Span<f64>
 ) -> Result<u64, NumericsError> {
-    if (m == 0 || k == 0 || n == 0 || tile_size == 0) { return Err(InvalidDimension); }
+    if (m == 0 || k == 0 || n == 0 || tile_size == 0) {
+        return Err(InvalidDimension);
+    }
+
     let a_required: u64 = checked_product_size(checked_mul(m, k))?;
     let b_required: u64 = checked_product_size(checked_mul(k, n))?;
     let c_required: u64 = checked_product_size(checked_mul(m, n))?;
-    if (a.len != a_required || b.len != b_required || c.len != c_required) { return Err(DimensionMismatch); }
+
+    if (a.len != a_required || b.len != b_required || c.len != c_required) {
+        return Err(DimensionMismatch);
+    }
+
     validate_finite_span(a)?;
     validate_finite_span(b)?;
     let mut c_ptr: *f64 = c.ptr;
+
     parfor (row in 0..m) {
         let mut col_start: u64 = 0;
+
         while (col_start < n) {
             let remaining_cols: u64 = n - col_start;
             let mut col_end: u64 = n;
             if (tile_size < remaining_cols) { col_end = col_start + tile_size; }
             for (col in col_start..col_end) { c_ptr[row * n + col] = 0.0; }
             let mut inner_start: u64 = 0;
+
             while (inner_start < k) {
                 let remaining_inner: u64 = k - inner_start;
                 let mut inner_end: u64 = k;
-                if (tile_size < remaining_inner) { inner_end = inner_start + tile_size; }
+
+                if (tile_size < remaining_inner) {
+                    inner_end = inner_start + tile_size;
+                }
+
                 for (inner in inner_start..inner_end) {
                     let a_value: f64 = a.ptr[row * k + inner];
+
                     for (col in col_start..col_end) {
-                        c_ptr[row * n + col] = c_ptr[row * n + col] + a_value * b.ptr[inner * n + col];
+                        c_ptr[row * n + col] = c_ptr[row * n + col] + a_value *
+                            b.ptr[inner * n + col];
                     }
                 }
+
                 inner_start = inner_end;
             }
+
             col_start = col_end;
         }
     }
+
     validate_finite_result_span(c)?;
     return Ok(c_required);
 }
@@ -263,55 +292,96 @@ pub fn blocked_matmul_f64(
 // reuse the matrix for many products/solves.
 pub fn csr_validate(matrix: CSRMatrixF64) -> Result<u64, NumericsError> {
     if (matrix.rows == 0 || matrix.cols == 0) { return Err(InvalidDimension); }
-    let expected_offsets: u64 = checked_product_size(checked_add(matrix.rows, 1))?;
-    if (matrix.row_offsets.len != expected_offsets || matrix.col_indices.len != matrix.nnz || matrix.values.len != matrix.nnz) {
+    let expected_offsets: u64 =
+        checked_product_size(checked_add(matrix.rows, 1))?;
+
+    if (matrix.row_offsets.len != expected_offsets || matrix.col_indices.len !=
+        matrix.nnz || matrix.values.len != matrix.nnz) {
         return Err(DimensionMismatch);
     }
-    if (matrix.row_offsets[0] != 0 || matrix.row_offsets[matrix.rows] != matrix.nnz) { return Err(InvalidCSR); }
+
+    if (matrix.row_offsets[0] != 0 || matrix.row_offsets[matrix.rows] !=
+        matrix.nnz) { return Err(InvalidCSR); }
+
     validate_finite_span(matrix.values)?;
+
     for (row in 0..matrix.rows) {
-        if (matrix.row_offsets[row] > matrix.row_offsets[row + 1]) { return Err(InvalidCSR); }
-        if (matrix.row_offsets[row + 1] > matrix.nnz) { return Err(InvalidCSR); }
+        if (matrix.row_offsets[row] > matrix.row_offsets[row + 1]) {
+            return Err(InvalidCSR);
+        }
+
+        if (matrix.row_offsets[row + 1] > matrix.nnz) {
+            return Err(InvalidCSR);
+        }
     }
-    for (i in 0..matrix.nnz) { if (matrix.col_indices[i] >= matrix.cols) { return Err(InvalidIndex); } }
+
+    for (i in 0..matrix.nnz) {
+        if (matrix.col_indices[i] >= matrix.cols) { return Err(InvalidIndex); }
+    }
+
     return Ok(matrix.nnz);
 }
 
-pub fn csr_matvec_f64(matrix: CSRMatrixF64, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsError> {
+pub fn csr_matvec_f64(
+    matrix: CSRMatrixF64, x: Span<f64>, y: Span<f64>
+) -> Result<u64, NumericsError> {
     csr_validate(matrix)?;
-    if (x.len != matrix.cols || y.len != matrix.rows) { return Err(DimensionMismatch); }
+
+    if (x.len != matrix.cols || y.len != matrix.rows) {
+        return Err(DimensionMismatch);
+    }
+
     validate_finite_span(x)?;
     let mut y_ptr: *f64 = y.ptr;
+
     parfor (row in 0..matrix.rows) {
         let mut sum: f64 = 0.0;
+
         for (entry in matrix.row_offsets[row]..matrix.row_offsets[row + 1]) {
-            sum = sum + matrix.values.ptr[entry] * x.ptr[matrix.col_indices.ptr[entry]];
+            sum = sum + matrix.values.ptr[entry] *
+                x.ptr[matrix.col_indices.ptr[entry]];
         }
+
         y_ptr[row] = sum;
     }
+
     validate_finite_result_span(y)?;
     return Ok(matrix.rows);
 }
 
 impl LinearOperatorF64 for CSRMatrixF64 {
-    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsError> {
-        return csr_matvec_f64(operator, x, y);
-    }
+    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) ->
+        Result<u64, NumericsError> { return csr_matvec_f64(operator, x, y); }
 }
 
 impl LinearOperatorF64 for DenseMatrixF64 {
-    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsError> {
-        if (operator.rows == 0 || operator.cols == 0) { return Err(InvalidDimension); }
-        let required: u64 = checked_product_size(checked_mul(operator.rows, operator.cols))?;
-        if (operator.values.len != required || x.len != operator.cols || y.len != operator.rows) { return Err(DimensionMismatch); }
+    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) ->
+        Result<u64, NumericsError> {
+        if (operator.rows == 0 || operator.cols == 0) {
+            return Err(InvalidDimension);
+        }
+
+        let required: u64 =
+            checked_product_size(checked_mul(operator.rows, operator.cols))?;
+
+        if (operator.values.len != required || x.len != operator.cols || y.len !=
+            operator.rows) { return Err(DimensionMismatch); }
+
         validate_finite_span(operator.values)?;
         validate_finite_span(x)?;
         let mut y_ptr: *f64 = y.ptr;
+
         parfor (row in 0..operator.rows) {
             let mut total: f64 = 0.0;
-            for (col in 0..operator.cols) { total = total + operator.values.ptr[row * operator.cols + col] * x.ptr[col]; }
+
+            for (col in 0..operator.cols) {
+                total = total + operator.values.ptr[row * operator.cols + col] *
+                    x.ptr[col];
+            }
+
             y_ptr[row] = total;
         }
+
         validate_finite_result_span(y)?;
         return Ok(operator.rows);
     }
@@ -321,29 +391,47 @@ impl LinearOperatorF64 for DenseMatrixF64 {
 // Entries retain input order within each row; duplicates are legal and are
 // summed by csr_matvec_f64. Output buffers must have nnz/rows+1 capacity.
 pub fn coo_to_csr_f64(
-    rows: u64, cols: u64, row_indices: Span<u64>, col_indices: Span<u64>, values: Span<f64>,
-    row_offsets_out: Span<u64>, col_indices_out: Span<u64>, values_out: Span<f64>, cursor: Span<u64>
+    rows: u64, cols: u64, row_indices: Span<u64>, col_indices: Span<u64>,
+    values: Span<f64>, row_offsets_out: Span<u64>, col_indices_out: Span<u64>,
+    values_out: Span<f64>, cursor: Span<u64>
 ) -> Result<u64, NumericsError> {
     if (rows == 0 || cols == 0) { return Err(InvalidDimension); }
     let nnz: u64 = values.len;
     let required_offsets: u64 = checked_product_size(checked_add(rows, 1))?;
-    if (row_indices.len != nnz || col_indices.len != nnz || col_indices_out.len < nnz || values_out.len < nnz || row_offsets_out.len != required_offsets || cursor.len != rows) { return Err(DimensionMismatch); }
+
+    if (row_indices.len != nnz || col_indices.len != nnz ||
+        col_indices_out.len < nnz || values_out.len < nnz || row_offsets_out.len !=
+        required_offsets || cursor.len != rows) {
+        return Err(DimensionMismatch);
+    }
+
     validate_finite_span(values)?;
     let mut offsets_ptr: *u64 = row_offsets_out.ptr;
     let mut cursor_ptr: *u64 = cursor.ptr;
     for (i in 0..(rows + 1)) { offsets_ptr[i] = 0; }
+
     for (i in 0..nnz) {
-        if (row_indices.ptr[i] >= rows || col_indices.ptr[i] >= cols) { return Err(InvalidIndex); }
-        let row_count: Option<u64> = checked_add(offsets_ptr[row_indices.ptr[i] + 1], 1);
+        if (row_indices.ptr[i] >= rows || col_indices.ptr[i] >= cols) {
+            return Err(InvalidIndex);
+        }
+
+        let row_count: Option<u64> = checked_add(
+                offsets_ptr[row_indices.ptr[i] + 1], 1);
+
         match (row_count) {
             Some(count) => { offsets_ptr[row_indices.ptr[i] + 1] = count; }
             None => { return Err(SizeOverflow); }
         }
     }
-    for (row in 0..rows) { offsets_ptr[row + 1] = offsets_ptr[row + 1] + offsets_ptr[row]; }
+
+    for (row in 0..rows) {
+        offsets_ptr[row + 1] = offsets_ptr[row + 1] + offsets_ptr[row];
+    }
+
     for (row in 0..rows) { cursor_ptr[row] = offsets_ptr[row]; }
     let mut columns_ptr: *u64 = col_indices_out.ptr;
     let mut values_ptr: *f64 = values_out.ptr;
+
     for (i in 0..nnz) {
         let row: u64 = row_indices.ptr[i];
         let position: u64 = cursor_ptr[row];
@@ -351,48 +439,79 @@ pub fn coo_to_csr_f64(
         values_ptr[position] = values.ptr[i];
         cursor_ptr[row] = cursor_ptr[row] + 1;
     }
+
     return Ok(nnz);
 }
 
-pub fn csr_inverse_diagonal_f64(matrix: CSRMatrixF64, inverse_diagonal: Span<f64>) -> Result<u64, NumericsError> {
+pub fn csr_inverse_diagonal_f64(
+    matrix: CSRMatrixF64, inverse_diagonal: Span<f64>
+) -> Result<u64, NumericsError> {
     csr_validate(matrix)?;
-    if (matrix.rows != matrix.cols || inverse_diagonal.len != matrix.rows) { return Err(DimensionMismatch); }
+
+    if (matrix.rows != matrix.cols || inverse_diagonal.len != matrix.rows) {
+        return Err(DimensionMismatch);
+    }
+
     let mut inverse_ptr: *f64 = inverse_diagonal.ptr;
+
     parfor (row in 0..matrix.rows) {
         let mut diagonal: f64 = 0.0;
+
         for (entry in matrix.row_offsets[row]..matrix.row_offsets[row + 1]) {
-            if (matrix.col_indices.ptr[entry] == row) { diagonal = diagonal + matrix.values.ptr[entry]; }
+            if (matrix.col_indices.ptr[entry] == row) {
+                diagonal = diagonal + matrix.values.ptr[entry];
+            }
         }
+
         inverse_ptr[row] = diagonal;
     }
+
     for (row in 0..matrix.rows) {
-        if (!finite_f64(inverse_ptr[row]) || inverse_ptr[row] <= 0.0) { return Err(InvalidPreconditioner); }
+        if (!finite_f64(inverse_ptr[row]) || inverse_ptr[row] <= 0.0) {
+            return Err(InvalidPreconditioner);
+        }
+
         inverse_ptr[row] = 1.0 / inverse_ptr[row];
-        if (!finite_f64(inverse_ptr[row])) { return Err(InvalidPreconditioner); }
+        if (!finite_f64(inverse_ptr[row])) {
+            return Err(InvalidPreconditioner);
+        }
     }
+
     return Ok(matrix.rows);
 }
 
-pub fn diagonal_inverse_f64(diagonal: Span<f64>, inverse_diagonal: Span<f64>) -> Result<u64, NumericsError> {
+pub fn diagonal_inverse_f64(
+    diagonal: Span<f64>, inverse_diagonal: Span<f64>
+) -> Result<u64, NumericsError> {
     if (diagonal.len != inverse_diagonal.len) { return Err(DimensionMismatch); }
     validate_finite_span(diagonal)?;
     let mut inverse_ptr: *f64 = inverse_diagonal.ptr;
     parfor (i in 0..diagonal.len) { inverse_ptr[i] = diagonal.ptr[i]; }
+
     for (i in 0..diagonal.len) {
         if (inverse_ptr[i] <= 0.0) { return Err(InvalidPreconditioner); }
         inverse_ptr[i] = 1.0 / inverse_ptr[i];
         if (!finite_f64(inverse_ptr[i])) { return Err(InvalidPreconditioner); }
     }
+
     return Ok(diagonal.len);
 }
 
 impl PreconditionerF64 for JacobiPreconditionerF64 {
-    fn apply(preconditioner: Self, residual: Span<f64>, output: Span<f64>) -> Result<u64, NumericsError> {
-        if (residual.len != preconditioner.inverse_diagonal.len || output.len != residual.len) { return Err(DimensionMismatch); }
+    fn apply(preconditioner: Self, residual: Span<f64>, output: Span<f64>) ->
+        Result<u64, NumericsError> {
+        if (residual.len != preconditioner.inverse_diagonal.len || output.len !=
+            residual.len) { return Err(DimensionMismatch); }
+
         validate_finite_span(residual)?;
         validate_finite_span(preconditioner.inverse_diagonal)?;
         let mut output_ptr: *f64 = output.ptr;
-        parfor (i in 0..residual.len) { output_ptr[i] = preconditioner.inverse_diagonal.ptr[i] * residual.ptr[i]; }
+
+        parfor (i in 0..residual.len) {
+            output_ptr[i] = preconditioner.inverse_diagonal.ptr[i] *
+                residual.ptr[i];
+        }
+
         validate_finite_result_span(output)?;
         return Ok(residual.len);
     }
@@ -406,12 +525,20 @@ impl PreconditionerF64 for JacobiPreconditionerF64 {
 pub struct DiagonalOperatorF64 { diagonal: Span<f64> }
 
 pub impl LinearOperatorF64 for DiagonalOperatorF64 {
-    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsError> {
-        if (operator.diagonal.len != x.len || y.len != x.len) { return Err(DimensionMismatch); }
+    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) ->
+        Result<u64, NumericsError> {
+        if (operator.diagonal.len != x.len || y.len != x.len) {
+            return Err(DimensionMismatch);
+        }
+
         validate_finite_span(operator.diagonal)?;
         validate_finite_span(x)?;
         let mut output_ptr: *f64 = y.ptr;
-        parfor (i in 0..x.len) { output_ptr[i] = operator.diagonal.ptr[i] * x.ptr[i]; }
+
+        parfor (i in 0..x.len) {
+            output_ptr[i] = operator.diagonal.ptr[i] * x.ptr[i];
+        }
+
         validate_finite_result_span(y)?;
         return Ok(x.len);
     }
@@ -423,16 +550,17 @@ pub impl LinearOperatorF64 for DiagonalOperatorF64 {
 // exist so the test suite can exercise the documented return-count and
 // non-finite-output checks; they must not be used as real operators.
 pub struct ShortOperatorF64 { }
+
 pub struct OverflowOperatorF64 { }
 
 pub impl LinearOperatorF64 for ShortOperatorF64 {
-    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsError> {
-        return Ok(x.len - 1);
-    }
+    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) ->
+        Result<u64, NumericsError> { return Ok(x.len - 1); }
 }
 
 pub impl LinearOperatorF64 for OverflowOperatorF64 {
-    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsError> {
+    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) ->
+        Result<u64, NumericsError> {
         let mut output_ptr: *f64 = y.ptr;
         parfor (i in 0..x.len) { output_ptr[i] = x.ptr[i] * 1.0e308; }
         return Ok(x.len);
@@ -443,7 +571,11 @@ fn apply_operator_checked<T: LinearOperatorF64>(
     operator: T, input: Span<f64>, output: Span<f64>, expected: u64
 ) -> Result<u64, NumericsError> {
     let count: u64 = LinearOperatorF64::apply(operator, input, output)?;
-    if (count != expected || output.len != expected) { return Err(DimensionMismatch); }
+
+    if (count != expected || output.len != expected) {
+        return Err(DimensionMismatch);
+    }
+
     validate_finite_result_span(output)?;
     return Ok(count);
 }
@@ -451,8 +583,13 @@ fn apply_operator_checked<T: LinearOperatorF64>(
 fn apply_preconditioner_checked<P: PreconditionerF64>(
     preconditioner: P, residual: Span<f64>, output: Span<f64>, expected: u64
 ) -> Result<u64, NumericsError> {
-    let count: u64 = PreconditionerF64::apply(preconditioner, residual, output)?;
-    if (count != expected || output.len != expected) { return Err(DimensionMismatch); }
+    let count: u64 = PreconditionerF64::apply(
+            preconditioner, residual, output)?;
+
+    if (count != expected || output.len != expected) {
+        return Err(DimensionMismatch);
+    }
+
     validate_finite_result_span(output)?;
     return Ok(count);
 }
@@ -460,48 +597,87 @@ fn apply_preconditioner_checked<P: PreconditionerF64>(
 // Matrix-free conjugate gradient. The operator may be dense, CSR or a user
 // type whose LinearOperatorF64 implementation computes y = A*x directly.
 pub fn conjugate_gradient_operator_f64<T: LinearOperatorF64>(
-    operator: T, n: u64, b: Span<f64>, x: Span<f64>, residual: Span<f64>, direction: Span<f64>, product: Span<f64>,
-    max_iterations: u64, tolerance: f64
+    operator: T, n: u64, b: Span<f64>, x: Span<f64>, residual: Span<f64>,
+    direction: Span<f64>, product: Span<f64>, max_iterations: u64,
+    tolerance: f64
 ) -> Result<CGReport, NumericsError> {
     if (n == 0) { return Err(InvalidDimension); }
-    if (!finite_f64(tolerance) || tolerance < 0.0) { return Err(InvalidTolerance); }
-    if (b.len != n || x.len != n || residual.len != n || direction.len != n || product.len != n) { return Err(DimensionMismatch); }
+
+    if (!finite_f64(tolerance) || tolerance < 0.0) {
+        return Err(InvalidTolerance);
+    }
+
+    if (b.len != n || x.len != n || residual.len != n || direction.len != n ||
+        product.len != n) { return Err(DimensionMismatch); }
+
     validate_finite_span(b)?;
     validate_finite_span(x)?;
     let mut residual_ptr: *f64 = residual.ptr;
     let mut direction_ptr: *f64 = direction.ptr;
     let mut x_ptr: *f64 = x.ptr;
     apply_operator_checked(operator, x, product, n)?;
-    for (i in 0..n) { residual_ptr[i] = b.ptr[i] - product.ptr[i]; direction_ptr[i] = residual_ptr[i]; }
+
+    for (i in 0..n) {
+        residual_ptr[i] = b.ptr[i] - product.ptr[i];
+        direction_ptr[i] = residual_ptr[i];
+    }
+
     validate_finite_result_span(residual)?;
     let mut rr: f64 = dot_f64(residual, residual)?;
     let mut residual_norm: f64 = norm2_f64(residual)?;
-    if (residual_norm <= tolerance) { return Ok(CGReport { iterations: 0, residual_norm: residual_norm, converged: true }); }
+
+    if (residual_norm <= tolerance) {
+        return Ok(CGReport {
+            iterations: 0, residual_norm: residual_norm, converged: true
+        });
+    }
+
     let mut completed: u64 = 0;
     let mut converged: bool = false;
+
     for (iteration in 0..max_iterations) {
         apply_operator_checked(operator, direction, product, n)?;
         let denominator: f64 = dot_f64(direction, product)?;
-        if (!finite_f64(denominator) || denominator <= 0.0) { return Err(NotPositiveDefinite); }
+
+        if (!finite_f64(denominator) || denominator <= 0.0) {
+            return Err(NotPositiveDefinite);
+        }
+
         let alpha: f64 = rr / denominator;
         if (!finite_f64(alpha)) { return Err(NonFiniteResult); }
+
         parfor (i in 0..n) {
             x_ptr[i] = x_ptr[i] + alpha * direction_ptr[i];
             residual_ptr[i] = residual_ptr[i] - alpha * product.ptr[i];
         }
+
         validate_finite_result_span(x)?;
         validate_finite_result_span(residual)?;
         let next_rr: f64 = dot_f64(residual, residual)?;
         residual_norm = norm2_f64(residual)?;
         completed = iteration + 1;
-        if (residual_norm <= tolerance) { rr = next_rr; converged = true; break; }
+
+        if (residual_norm <= tolerance) {
+            rr = next_rr;
+            converged = true;
+            break;
+        }
+
         if (rr <= 0.0) { return Err(SolverBreakdown); }
         let beta: f64 = next_rr / rr;
         if (!finite_f64(beta)) { return Err(NonFiniteResult); }
-        parfor (i in 0..n) { direction_ptr[i] = residual_ptr[i] + beta * direction_ptr[i]; }
+
+        parfor (i in 0..n) {
+            direction_ptr[i] = residual_ptr[i] + beta * direction_ptr[i];
+        }
+
         rr = next_rr;
     }
-    return Ok(CGReport { iterations: completed, residual_norm: residual_norm, converged: converged });
+
+    return Ok(CGReport {
+        iterations: completed, residual_norm: residual_norm,
+        converged: converged
+    });
 }
 
 pub fn preconditioned_conjugate_gradient_f64<T: LinearOperatorF64, P: PreconditionerF64>(
@@ -510,8 +686,16 @@ pub fn preconditioned_conjugate_gradient_f64<T: LinearOperatorF64, P: Preconditi
     max_iterations: u64, tolerance: f64
 ) -> Result<CGReport, NumericsError> {
     if (n == 0) { return Err(InvalidDimension); }
-    if (!finite_f64(tolerance) || tolerance < 0.0) { return Err(InvalidTolerance); }
-    if (b.len != n || x.len != n || residual.len != n || z.len != n || direction.len != n || product.len != n) { return Err(DimensionMismatch); }
+
+    if (!finite_f64(tolerance) || tolerance < 0.0) {
+        return Err(InvalidTolerance);
+    }
+
+    if (b.len != n || x.len != n || residual.len != n || z.len != n ||
+        direction.len != n || product.len != n) {
+        return Err(DimensionMismatch);
+    }
+
     validate_finite_span(b)?;
     validate_finite_span(x)?;
     let mut residual_ptr: *f64 = residual.ptr;
@@ -521,23 +705,32 @@ pub fn preconditioned_conjugate_gradient_f64<T: LinearOperatorF64, P: Preconditi
     for (i in 0..n) { residual_ptr[i] = b.ptr[i] - product.ptr[i]; }
     validate_finite_result_span(residual)?;
     let mut residual_norm: f64 = norm2_f64(residual)?;
-    if (residual_norm <= tolerance) { return Ok(CGReport { iterations: 0, residual_norm: residual_norm, converged: true }); }
+
+    if (residual_norm <= tolerance) {
+        return Ok(CGReport {
+            iterations: 0, residual_norm: residual_norm, converged: true
+        });
+    }
+
     apply_preconditioner_checked(preconditioner, residual, z, n)?;
     let mut rz: f64 = dot_f64(residual, z)?;
     if (rz <= 0.0) { return Err(InvalidPreconditioner); }
     for (i in 0..n) { direction_ptr[i] = z.ptr[i]; }
     let mut completed: u64 = 0;
     let mut converged: bool = false;
+
     for (iteration in 0..max_iterations) {
         apply_operator_checked(operator, direction, product, n)?;
         let denominator: f64 = dot_f64(direction, product)?;
         if (denominator <= 0.0) { return Err(NotPositiveDefinite); }
         let alpha: f64 = rz / denominator;
         if (!finite_f64(alpha)) { return Err(NonFiniteResult); }
+
         parfor (i in 0..n) {
             x_ptr[i] = x_ptr[i] + alpha * direction_ptr[i];
             residual_ptr[i] = residual_ptr[i] - alpha * product.ptr[i];
         }
+
         validate_finite_result_span(x)?;
         validate_finite_result_span(residual)?;
         residual_norm = norm2_f64(residual)?;
@@ -549,23 +742,39 @@ pub fn preconditioned_conjugate_gradient_f64<T: LinearOperatorF64, P: Preconditi
         if (rz == 0.0) { return Err(SolverBreakdown); }
         let beta: f64 = next_rz / rz;
         if (!finite_f64(beta)) { return Err(NonFiniteResult); }
-        parfor (i in 0..n) { direction_ptr[i] = z.ptr[i] + beta * direction_ptr[i]; }
+
+        parfor (i in 0..n) {
+            direction_ptr[i] = z.ptr[i] + beta * direction_ptr[i];
+        }
+
         rz = next_rz;
     }
-    return Ok(CGReport { iterations: completed, residual_norm: residual_norm, converged: converged });
+
+    return Ok(CGReport {
+        iterations: completed, residual_norm: residual_norm,
+        converged: converged
+    });
 }
 
 // BiCGStab supports general nonsymmetric operators. Six caller-owned work
 // vectors keep storage bounded; every vector must be distinct from x and from
 // the other workspaces. r_hat is a fixed shadow residual.
 pub fn bicgstab_f64<T: LinearOperatorF64>(
-    operator: T, n: u64, b: Span<f64>, x: Span<f64>, r: Span<f64>, r_hat: Span<f64>,
-    p: Span<f64>, v: Span<f64>, s: Span<f64>, t: Span<f64>,
+    operator: T, n: u64, b: Span<f64>, x: Span<f64>, r: Span<f64>,
+    r_hat: Span<f64>, p: Span<f64>, v: Span<f64>, s: Span<f64>, t: Span<f64>,
     max_iterations: u64, tolerance: f64
 ) -> Result<KrylovReport, NumericsError> {
     if (n == 0) { return Err(InvalidDimension); }
-    if (!finite_f64(tolerance) || tolerance < 0.0) { return Err(InvalidTolerance); }
-    if (b.len != n || x.len != n || r.len != n || r_hat.len != n || p.len != n || v.len != n || s.len != n || t.len != n) { return Err(DimensionMismatch); }
+
+    if (!finite_f64(tolerance) || tolerance < 0.0) {
+        return Err(InvalidTolerance);
+    }
+
+    if (b.len != n || x.len != n || r.len != n || r_hat.len != n || p.len != n ||
+        v.len != n || s.len != n || t.len != n) {
+        return Err(DimensionMismatch);
+    }
+
     validate_finite_span(b)?;
     validate_finite_span(x)?;
     let mut r_ptr: *f64 = r.ptr;
@@ -577,22 +786,40 @@ pub fn bicgstab_f64<T: LinearOperatorF64>(
     let mut x_ptr: *f64 = x.ptr;
     apply_operator_checked(operator, x, t, n)?;
     validate_finite_result_span(t)?;
-    for (i in 0..n) { r_ptr[i] = b.ptr[i] - t.ptr[i]; rh_ptr[i] = r_ptr[i]; p_ptr[i] = 0.0; v_ptr[i] = 0.0; }
+
+    for (i in 0..n) {
+        r_ptr[i] = b.ptr[i] - t.ptr[i];
+        rh_ptr[i] = r_ptr[i];
+        p_ptr[i] = 0.0;
+        v_ptr[i] = 0.0;
+    }
+
     validate_finite_result_span(r)?;
     validate_finite_result_span(r_hat)?;
     let mut residual_norm: f64 = norm2_f64(r)?;
-    if (residual_norm <= tolerance) { return Ok(KrylovReport { iterations: 0, residual_norm: residual_norm, converged: true }); }
+
+    if (residual_norm <= tolerance) {
+        return Ok(KrylovReport {
+            iterations: 0, residual_norm: residual_norm, converged: true
+        });
+    }
+
     let mut rho_previous: f64 = 1.0;
     let mut alpha: f64 = 1.0;
     let mut omega: f64 = 1.0;
     let mut completed: u64 = 0;
     let mut converged: bool = false;
+
     for (iteration in 0..max_iterations) {
         let rho: f64 = dot_f64(r_hat, r)?;
         if (rho == 0.0 || omega == 0.0) { return Err(SolverBreakdown); }
         let beta: f64 = (rho / rho_previous) * (alpha / omega);
         if (!finite_f64(beta)) { return Err(NonFiniteResult); }
-        parfor (i in 0..n) { p_ptr[i] = r_ptr[i] + beta * (p_ptr[i] - omega * v_ptr[i]); }
+
+        parfor (i in 0..n) {
+            p_ptr[i] = r_ptr[i] + beta * (p_ptr[i] - omega * v_ptr[i]);
+        }
+
         apply_operator_checked(operator, p, v, n)?;
         let rho_v: f64 = dot_f64(r_hat, v)?;
         if (rho_v == 0.0) { return Err(SolverBreakdown); }
@@ -602,58 +829,74 @@ pub fn bicgstab_f64<T: LinearOperatorF64>(
         validate_finite_result_span(s)?;
         let s_norm: f64 = norm2_f64(s)?;
         completed = iteration + 1;
+
         if (s_norm <= tolerance) {
             parfor (i in 0..n) {
                 x_ptr[i] = x_ptr[i] + alpha * p_ptr[i];
                 r_ptr[i] = s_ptr[i];
             }
+
             validate_finite_result_span(x)?;
             validate_finite_result_span(r)?;
             residual_norm = s_norm;
             converged = true;
             break;
         }
+
         apply_operator_checked(operator, s, t, n)?;
         let tt: f64 = dot_f64(t, t)?;
         if (tt == 0.0) { return Err(SolverBreakdown); }
         omega = dot_f64(t, s)? / tt;
         if (!finite_f64(omega) || omega == 0.0) { return Err(SolverBreakdown); }
+
         parfor (i in 0..n) {
             x_ptr[i] = x_ptr[i] + alpha * p_ptr[i] + omega * s_ptr[i];
             r_ptr[i] = s_ptr[i] - omega * t_ptr[i];
         }
+
         validate_finite_result_span(x)?;
         validate_finite_result_span(r)?;
         residual_norm = norm2_f64(r)?;
         if (residual_norm <= tolerance) { converged = true; break; }
         rho_previous = rho;
     }
-    return Ok(KrylovReport { iterations: completed, residual_norm: residual_norm, converged: converged });
+
+    return Ok(KrylovReport {
+        iterations: completed, residual_norm: residual_norm,
+        converged: converged
+    });
 }
 
 // Dense SPD compatibility wrapper retained for the original API.
 pub fn conjugate_gradient_f64(
     n: u64, a: Span<f64>, b: Span<f64>, x: Span<f64>, residual: Span<f64>,
-    direction: Span<f64>, product: Span<f64>, max_iterations: u64, tolerance: f64
+    direction: Span<f64>, product: Span<f64>, max_iterations: u64,
+    tolerance: f64
 ) -> Result<CGReport, NumericsError> {
     if (n == 0) { return Err(InvalidDimension); }
     let required: u64 = checked_product_size(checked_mul(n, n))?;
     if (a.len != required) { return Err(DimensionMismatch); }
     validate_finite_span(a)?;
-    let operator: DenseMatrixF64 = DenseMatrixF64 { rows: n, cols: n, values: a };
-    return conjugate_gradient_operator_f64(operator, n, b, x, residual, direction, product, max_iterations, tolerance);
+    let operator: DenseMatrixF64 = DenseMatrixF64 {
+        rows: n, cols: n, values: a
+    };
+    return conjugate_gradient_operator_f64(
+            operator, n, b, x, residual, direction, product, max_iterations,
+            tolerance);
 }
 
 // ---------------------------------------------------------------------------
 // 0.3.0 additions: validated matrix representations, canonical CSR, and
 // restarted GMRES with a PreconditionerF64 (identity or otherwise).
 // ---------------------------------------------------------------------------
-
 // Validates the dense matrix view once so callers can reuse it for many
 // products/solves: shape/length agreement plus finite values.
-pub fn dense_matrix_validate_f64(matrix: DenseMatrixF64) -> Result<u64, NumericsError> {
+pub fn dense_matrix_validate_f64(
+    matrix: DenseMatrixF64
+) -> Result<u64, NumericsError> {
     if (matrix.rows == 0 || matrix.cols == 0) { return Err(InvalidDimension); }
-    let required: u64 = checked_product_size(checked_mul(matrix.rows, matrix.cols))?;
+    let required: u64 =
+        checked_product_size(checked_mul(matrix.rows, matrix.cols))?;
     if (matrix.values.len != required) { return Err(DimensionMismatch); }
     validate_finite_span(matrix.values)?;
     return Ok(required);
@@ -662,15 +905,20 @@ pub fn dense_matrix_validate_f64(matrix: DenseMatrixF64) -> Result<u64, Numerics
 // Structural symmetry of a square dense matrix by exact mirrored-entry
 // equality. This is a validation/inspection kernel, not a tolerance-based
 // near-symmetry test; callers wanting a tolerance must compare themselves.
-pub fn dense_matrix_is_symmetric_f64(matrix: DenseMatrixF64) -> Result<bool, NumericsError> {
+pub fn dense_matrix_is_symmetric_f64(
+    matrix: DenseMatrixF64
+) -> Result<bool, NumericsError> {
     if (matrix.rows != matrix.cols) { return Err(DimensionMismatch); }
     dense_matrix_validate_f64(matrix)?;
     let mut values_ptr: *f64 = matrix.values.ptr;
+
     for (row in 0..matrix.rows) {
         for (col in (row + 1)..matrix.cols) {
-            if (values_ptr[row * matrix.cols + col] != values_ptr[col * matrix.cols + row]) { return Ok(false); }
+            if (values_ptr[row * matrix.cols + col] !=
+                values_ptr[col * matrix.cols + row]) { return Ok(false); }
         }
     }
+
     return Ok(true);
 }
 
@@ -682,32 +930,42 @@ pub fn dense_matrix_is_symmetric_f64(matrix: DenseMatrixF64) -> Result<bool, Num
 // the returned value is the merged nonzero count (callers shrink the CSR
 // view's nnz field to it). Duplicate sums are checked for finiteness.
 pub fn csr_merge_duplicates_f64(
-    matrix: CSRMatrixF64,
-    row_offsets_out: Span<u64>, col_indices_out: Span<u64>, values_out: Span<f64>
+    matrix: CSRMatrixF64, row_offsets_out: Span<u64>,
+    col_indices_out: Span<u64>, values_out: Span<f64>
 ) -> Result<u64, NumericsError> {
     csr_validate(matrix)?;
-    let expected_offsets: u64 = checked_product_size(checked_add(matrix.rows, 1))?;
-    if (row_offsets_out.len != expected_offsets || col_indices_out.len < matrix.nnz || values_out.len < matrix.nnz) { return Err(DimensionMismatch); }
+    let expected_offsets: u64 =
+        checked_product_size(checked_add(matrix.rows, 1))?;
+
+    if (row_offsets_out.len != expected_offsets ||
+        col_indices_out.len < matrix.nnz || values_out.len < matrix.nnz) {
+        return Err(DimensionMismatch);
+    }
+
     let mut offsets_ptr: *u64 = row_offsets_out.ptr;
     let mut columns_ptr: *u64 = col_indices_out.ptr;
     let mut merged_ptr: *f64 = values_out.ptr;
     offsets_ptr[0] = 0;
     let mut merged: u64 = 0;
+
     for (row in 0..matrix.rows) {
         let start: u64 = matrix.row_offsets[row];
         let end: u64 = matrix.row_offsets[row + 1];
         let row_base: u64 = merged;
         let mut width: u64 = 0;
+
         for (source in start..end) {
             let column: u64 = matrix.col_indices.ptr[source];
             let value: f64 = matrix.values.ptr[source];
             // insertion into the sorted output segment [row_base, row_base+width)
             let mut position: u64 = row_base + width;
+
             while (position > row_base && columns_ptr[position - 1] > column) {
                 columns_ptr[position] = columns_ptr[position - 1];
                 merged_ptr[position] = merged_ptr[position - 1];
                 position = position - 1;
             }
+
             if (position > row_base && columns_ptr[position - 1] == column) {
                 let sum: f64 = merged_ptr[position - 1] + value;
                 if (!finite_f64(sum)) { return Err(NonFiniteResult); }
@@ -718,9 +976,11 @@ pub fn csr_merge_duplicates_f64(
                 width = width + 1;
             }
         }
+
         merged = merged + width;
         offsets_ptr[row + 1] = merged;
     }
+
     return Ok(merged);
 }
 
@@ -728,20 +988,29 @@ pub fn csr_merge_duplicates_f64(
 // duplicate-carrying matrices: the (i, j) value is the within-row sum of the
 // duplicates and must equal the summed (j, i) value. Cost is O(nnz * row
 // length); this is an inspection/validation kernel, not a hot path.
-pub fn csr_is_symmetric_f64(matrix: CSRMatrixF64) -> Result<bool, NumericsError> {
+pub fn csr_is_symmetric_f64(
+    matrix: CSRMatrixF64
+) -> Result<bool, NumericsError> {
     csr_validate(matrix)?;
     if (matrix.rows != matrix.cols) { return Err(DimensionMismatch); }
+
     for (row in 0..matrix.rows) {
         for (entry in matrix.row_offsets[row]..matrix.row_offsets[row + 1]) {
             let column: u64 = matrix.col_indices.ptr[entry];
             let value: f64 = matrix.values.ptr[entry];
             let mut mirror: f64 = 0.0;
-            for (other in matrix.row_offsets[column]..matrix.row_offsets[column + 1]) {
-                if (matrix.col_indices.ptr[other] == row) { mirror = mirror + matrix.values.ptr[other]; }
+
+            for (other in matrix.row_offsets[column]..matrix.row_offsets[column +
+                1]) {
+                if (matrix.col_indices.ptr[other] == row) {
+                    mirror = mirror + matrix.values.ptr[other];
+                }
             }
+
             if (mirror != value) { return Ok(false); }
         }
     }
+
     return Ok(true);
 }
 
@@ -750,7 +1019,8 @@ pub fn csr_is_symmetric_f64(matrix: CSRMatrixF64) -> Result<bool, NumericsError>
 pub struct IdentityPreconditionerF64 { }
 
 pub impl PreconditionerF64 for IdentityPreconditionerF64 {
-    fn apply(preconditioner: Self, residual: Span<f64>, output: Span<f64>) -> Result<u64, NumericsError> {
+    fn apply(preconditioner: Self, residual: Span<f64>, output: Span<f64>) ->
+        Result<u64, NumericsError> {
         if (residual.len != output.len) { return Err(DimensionMismatch); }
         validate_finite_span(residual)?;
         let mut output_ptr: *f64 = output.ptr;
@@ -783,19 +1053,27 @@ pub impl PreconditionerF64 for IdentityPreconditionerF64 {
 // from the least squares estimate, so the report is directly checkable.
 pub fn preconditioned_gmres_f64<T: LinearOperatorF64, P: PreconditionerF64>(
     operator: T, preconditioner: P, n: u64, b: Span<f64>, x: Span<f64>,
-    krylov: Span<f64>, hessenberg: Span<f64>, cosines: Span<f64>, sines: Span<f64>,
-    givens_rhs: Span<f64>, y_coefficients: Span<f64>, update: Span<f64>,
-    restart: u64, max_iterations: u64, tolerance: f64
+    krylov: Span<f64>, hessenberg: Span<f64>, cosines: Span<f64>,
+    sines: Span<f64>, givens_rhs: Span<f64>, y_coefficients: Span<f64>,
+    update: Span<f64>, restart: u64, max_iterations: u64, tolerance: f64
 ) -> Result<KrylovReport, NumericsError> {
     if (n == 0) { return Err(InvalidDimension); }
     if (restart == 0) { return Err(InvalidDimension); }
-    if (!finite_f64(tolerance) || tolerance < 0.0) { return Err(InvalidTolerance); }
+
+    if (!finite_f64(tolerance) || tolerance < 0.0) {
+        return Err(InvalidTolerance);
+    }
+
     let plus_one: u64 = checked_product_size(checked_add(restart, 1))?;
     let basis_required: u64 = checked_product_size(checked_mul(plus_one, n))?;
-    let hessenberg_required: u64 = checked_product_size(checked_mul(plus_one, restart))?;
-    if (b.len != n || x.len != n || krylov.len != basis_required || hessenberg.len != hessenberg_required ||
-        cosines.len != restart || sines.len != restart || givens_rhs.len != plus_one ||
-        y_coefficients.len != restart || update.len != n) { return Err(DimensionMismatch); }
+    let hessenberg_required: u64 =
+        checked_product_size(checked_mul(plus_one, restart))?;
+
+    if (b.len != n || x.len != n || krylov.len != basis_required ||
+        hessenberg.len != hessenberg_required || cosines.len != restart ||
+        sines.len != restart || givens_rhs.len != plus_one || y_coefficients.len !=
+        restart || update.len != n) { return Err(DimensionMismatch); }
+
     validate_finite_span(b)?;
     validate_finite_span(x)?;
     let mut krylov_ptr: *f64 = krylov.ptr;
@@ -811,6 +1089,7 @@ pub fn preconditioned_gmres_f64<T: LinearOperatorF64, P: PreconditionerF64>(
     let mut total_inner: u64 = 0;
     let mut converged: bool = false;
     let mut residual_norm: f64 = 1.0e300;
+
     while (!converged && total_inner < max_iterations) {
         // residual r = b - A x, written into the V_0 slot.
         apply_operator_checked(operator, x, update, n)?;
@@ -828,6 +1107,7 @@ pub fn preconditioned_gmres_f64<T: LinearOperatorF64, P: PreconditionerF64>(
         for (j in 0..(restart + 1)) { givens_ptr[j] = 0.0; }
         givens_ptr[0] = beta;
         let mut stopped: u64 = restart;
+
         for (j in 0..restart) {
             if (total_inner >= max_iterations) { stopped = j; break; }
             // w = A * M^{-1} * v_j: z into update, w into the V_{j+1} slot.
@@ -835,19 +1115,24 @@ pub fn preconditioned_gmres_f64<T: LinearOperatorF64, P: PreconditionerF64>(
             let vnext: Span<f64> = krylov[(j + 1) * n..((j + 1) * n + n)];
             apply_preconditioner_checked(preconditioner, vj, update, n)?;
             apply_operator_checked(operator, update, vnext, n)?;
+
             // modified Gram-Schmidt against V_0..V_j.
             for (i in 0..(j + 1)) {
                 let vi: Span<f64> = krylov[i * n..(i * n + n)];
                 let coefficient: f64 = dot_f64(vnext, vi)?;
                 if (!finite_f64(coefficient)) { return Err(NonFiniteResult); }
                 hessenberg_ptr[j * stride + i] = coefficient;
+
                 for (k in 0..n) {
-                    let value: f64 = krylov_ptr[(j + 1) * n + k] - coefficient * krylov_ptr[i * n + k];
+                    let value: f64 = krylov_ptr[(j + 1) * n + k] - coefficient *
+                        krylov_ptr[i * n + k];
                     krylov_ptr[(j + 1) * n + k] = value;
                 }
             }
+
             let next_norm: f64 = norm2_f64(vnext)?;
             hessenberg_ptr[j * stride + j + 1] = next_norm;
+
             if (next_norm == 0.0) {
                 // lucky breakdown: the Krylov space already spans the exact
                 // solution. Skipping this column's rotation is equivalent
@@ -856,25 +1141,41 @@ pub fn preconditioned_gmres_f64<T: LinearOperatorF64, P: PreconditionerF64>(
                 stopped = j + 1;
                 break;
             }
+
             let inverse_norm: f64 = 1.0 / next_norm;
             if (!finite_f64(inverse_norm)) { return Err(NonFiniteResult); }
-            for (k in 0..n) { krylov_ptr[(j + 1) * n + k] = krylov_ptr[(j + 1) * n + k] * inverse_norm; }
+
+            for (k in 0..n) {
+                krylov_ptr[(j + 1) * n + k] = krylov_ptr[(j + 1) * n + k] *
+                    inverse_norm;
+            }
+
             // apply the accumulated rotations to the new column.
             let column: u64 = j * stride;
+
             for (i in 0..j) {
                 let upper: f64 = hessenberg_ptr[column + i];
                 let lower: f64 = hessenberg_ptr[column + i + 1];
-                hessenberg_ptr[column + i] = cosines_ptr[i] * upper + sines_ptr[i] * lower;
-                hessenberg_ptr[column + i + 1] = 0.0 - sines_ptr[i] * upper + cosines_ptr[i] * lower;
+                hessenberg_ptr[column + i] = cosines_ptr[i] * upper +
+                    sines_ptr[i] * lower;
+                hessenberg_ptr[column + i + 1] = 0.0 - sines_ptr[i] * upper +
+                    cosines_ptr[i] * lower;
             }
+
             let diagonal: f64 = hessenberg_ptr[column + j];
             let subdiagonal: f64 = hessenberg_ptr[column + j + 1];
-            let delta: f64 = sqrt(diagonal * diagonal + subdiagonal * subdiagonal);
+            let delta: f64 =
+                sqrt(diagonal * diagonal + subdiagonal * subdiagonal);
             if (delta == 0.0) { return Err(SolverBreakdown); }
             cosines_ptr[j] = diagonal / delta;
             sines_ptr[j] = subdiagonal / delta;
-            if (!finite_f64(cosines_ptr[j]) || !finite_f64(sines_ptr[j])) { return Err(NonFiniteResult); }
-            hessenberg_ptr[column + j] = cosines_ptr[j] * diagonal + sines_ptr[j] * subdiagonal;
+
+            if (!finite_f64(cosines_ptr[j]) || !finite_f64(sines_ptr[j])) {
+                return Err(NonFiniteResult);
+            }
+
+            hessenberg_ptr[column + j] = cosines_ptr[j] * diagonal +
+                sines_ptr[j] * subdiagonal;
             hessenberg_ptr[column + j + 1] = 0.0;
             givens_ptr[j + 1] = 0.0 - sines_ptr[j] * givens_ptr[j];
             givens_ptr[j] = cosines_ptr[j] * givens_ptr[j];
@@ -883,26 +1184,39 @@ pub fn preconditioned_gmres_f64<T: LinearOperatorF64, P: PreconditionerF64>(
             if (!finite_f64(estimate)) { return Err(NonFiniteResult); }
             if (fabs(estimate) <= tolerance) { stopped = j + 1; break; }
         }
+
         // triangular solve for y of size `stopped`, then x += M^{-1} (V y).
         let mut row_index: u64 = stopped;
+
         while (row_index > 0) {
             row_index = row_index - 1;
             let mut accumulated: f64 = givens_ptr[row_index];
+
             for (column_index in (row_index + 1)..stopped) {
-                accumulated = accumulated - hessenberg_ptr[column_index * stride + row_index] * y_ptr[column_index];
+                accumulated = accumulated -
+                    hessenberg_ptr[column_index * stride + row_index] *
+                    y_ptr[column_index];
             }
+
             let diagonal: f64 = hessenberg_ptr[row_index * stride + row_index];
             if (diagonal == 0.0) { return Err(SolverBreakdown); }
             let coefficient: f64 = accumulated / diagonal;
             if (!finite_f64(coefficient)) { return Err(NonFiniteResult); }
             y_ptr[row_index] = coefficient;
         }
+
         // t = sum_i y_i v_i into update, then z = M^{-1} t into the V_0 slot.
         for (i in 0..n) { update_ptr[i] = 0.0; }
+
         for (i in 0..stopped) {
             let coefficient: f64 = y_ptr[i];
-            for (k in 0..n) { update_ptr[k] = update_ptr[k] + coefficient * krylov_ptr[i * n + k]; }
+
+            for (k in 0..n) {
+                update_ptr[k] = update_ptr[k] + coefficient *
+                    krylov_ptr[i * n + k];
+            }
         }
+
         apply_preconditioner_checked(preconditioner, update, basis, n)?;
         parfor (i in 0..n) { x_ptr[i] = x_ptr[i] + krylov_ptr[i]; }
         validate_finite_result_span(x)?;
@@ -912,5 +1226,9 @@ pub fn preconditioned_gmres_f64<T: LinearOperatorF64, P: PreconditionerF64>(
         residual_norm = norm2_f64(update)?;
         if (residual_norm <= tolerance) { converged = true; }
     }
-    return Ok(KrylovReport { iterations: total_inner, residual_norm: residual_norm, converged: converged });
+
+    return Ok(KrylovReport {
+        iterations: total_inner, residual_norm: residual_norm,
+        converged: converged
+    });
 }
