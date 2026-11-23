@@ -1,0 +1,558 @@
+// Freshet-Data — FDO (Freshet-Data Optimised) columnar file format, v1.
+//
+// A self-describing, checksummed, optionally compressed binary container
+// for validated record-batch payloads:
+//
+//   Header (32 bytes, byte-order independent where possible):
+//     [0..4)   magic "FDO1" (literal bytes 0x46 0x44 0x4F 0x31)
+//     [4]      format version (1)
+//     [5]      byte-order marker: 'L' (0x4C) little-endian, 'B' (0x42) big
+//     [6]      reserved (0)               [7] reserved (0)
+//     [8..16)  row_count (u64, file byte order)
+//     [16..24) column_count (u64, file byte order)
+//     [24..32) header checksum (u64, Adler-32 of header bytes 0..24)
+//
+//   Column directory (80 bytes per column, file byte order):
+//     [0..16)  column name, NUL-padded printable ASCII (max 15 characters)
+//     [16..32) column unit, NUL-padded printable ASCII (max 15 characters)
+//     [32..40) data type code: 0 = f64, 1 = f32, 2 = i64, 3 = u64
+//     [40..48) element count (== row_count in v1)
+//     [48..56) payload byte offset (absolute, from the file start)
+//     [56..64) stored payload byte size (post-compression)
+//     [64..72) compression flag: 0 = raw, 1 = run-length encoded
+//     [72..80) payload checksum (u64, Adler-32 of the stored payload bytes)
+//
+//   Payloads: each column's elements in the file byte order. Run-length
+//   encoding stores (u64 run count, element bytes) pairs in the file byte
+//   order; a column requested with FdoRunLength falls back to raw storage
+//   when the encoded size would meet or exceed the raw size (the directory
+//   records the actual flag).
+//
+// All multi-byte integers are serialised with division/modulo arithmetic
+// and assembled with multiplication, so no bit-shift or bitwise operators
+// are used. The on-read schema check is strict: the caller declares the
+// expected type, name and unit, and mismatches are reported rather than
+// coerced.
+module fdo_format;
+import freshet_data;
+
+#link c
+extern fn fopen(path: *u8, mode: *u8) -> *void;
+extern fn fread(buffer: *void, size: usize, count: usize, file: *void) -> usize;
+extern fn fwrite(buffer: *void, size: usize, count: usize, file: *void) -> usize;
+extern fn fclose(file: *void) -> i32;
+extern fn fflush(file: *void) -> i32;
+extern fn ferror(file: *void) -> i32;
+extern fn fseek(file: *void, offset: i64, whence: i32) -> i32;
+
+pub enum FDOCompression { FdoRaw, FdoRunLength }
+
+pub struct FDOColumnSpec {
+    name: str,
+    unit: str,
+    data_type: ColumnType,
+    byte_offset: u64,
+    compression: FDOCompression
+}
+
+pub struct FDOEncodedColumn {
+    stored_size: u64,
+    compressed: bool
+}
+
+// Read-side handle. Closed exactly once with fdo_close; like BinaryFile,
+// a `borrowed mut` close cannot invalidate the caller's copy (fsht-03:02
+// aggregate borrows do not write back), so a second close of the same
+// handle is undefined.
+pub struct FDOReader {
+    handle: *void,
+    row_count: u64,
+    column_count: u64,
+    file_is_little_endian: bool
+}
+
+fn fdo_finite_f64(value: f64) -> bool { return value - value == 0.0; }
+
+// Adler-32 over a byte span, computed in u64 arithmetic with a final
+// multiplication in place of the usual shift. Detects every single-byte
+// change; not a cryptographic digest.
+pub fn fdo_adler32(bytes: Span<u8>) -> Result<u64, DataError> {
+    let mut sum1: u64 = 1;
+    let mut sum2: u64 = 0;
+    for (i in 0..bytes.len) {
+        sum1 = (sum1 + (bytes.ptr[i] as u64)) % 65521;
+        sum2 = (sum2 + sum1) % 65521;
+    }
+    return Ok(sum2 * 65536 + sum1);
+}
+
+fn fdo_host_is_little_endian() -> bool {
+    let marker: u64 = 1;
+    let marker_pointer: *u64 = &marker;
+    let marker_bytes: *u8 = marker_pointer as *u8;
+    return marker_bytes[0] == 1;
+}
+
+// Serialise a u64 at `base` in the file byte order using division/modulo.
+fn fdo_store_u64(bytes: Span<u8>, base: u64, value: u64, file_little: bool) {
+    let mut bytes_ptr: *u8 = bytes.ptr;
+    let mut scale: u64 = 1;
+    for (i in 0..8) {
+        let byte: u8 = ((value / scale) % 256) as u8;
+        if (file_little) { bytes_ptr[base + i] = byte; }
+        else { bytes_ptr[base + 7 - i] = byte; }
+        scale = scale * 256;
+    }
+}
+
+// Assemble a u64 from `base` in the file byte order using multiplication.
+fn fdo_load_u64(bytes: Span<u8>, base: u64, file_little: bool) -> u64 {
+    let mut value: u64 = 0;
+    if (file_little) {
+        let mut scale: u64 = 1;
+        for (i in 0..8) {
+            value = value + (bytes.ptr[base + i] as u64) * scale;
+            scale = scale * 256;
+        }
+    } else {
+        for (i in 0..8) {
+            value = value * 256 + (bytes.ptr[base + i] as u64);
+        }
+    }
+    return value;
+}
+
+fn fdo_column_width(data_type: ColumnType) -> Result<u64, DataError> {
+    let mut width: u64 = 8;
+    match (data_type) {
+        F64 => { width = 8; }
+        F32 => { width = 4; }
+        I64 => { width = 8; }
+        U64 => { width = 8; }
+    }
+    return Ok(width);
+}
+
+fn fdo_type_code(data_type: ColumnType) -> Result<u64, DataError> {
+    let mut code: u64 = 0;
+    match (data_type) {
+        F64 => { code = 0; }
+        F32 => { code = 1; }
+        I64 => { code = 2; }
+        U64 => { code = 3; }
+    }
+    return Ok(code);
+}
+
+fn fdo_type_from_code(code: u64) -> Result<ColumnType, DataError> {
+    let mut data_type: ColumnType = F64;
+    match (code) {
+        0 => { data_type = F64; }
+        1 => { data_type = F32; }
+        2 => { data_type = I64; }
+        3 => { data_type = U64; }
+    }
+    return Ok(data_type);
+}
+
+// A usable name/unit: NUL-terminated within 16 bytes of its C-string form
+// (so at most 15 characters) and every character printable ASCII.
+fn fdo_name_length(name: str) -> Result<u64, DataError> {
+    let c_string: *u8 = str_to_cstr(name);
+    let mut length: u64 = 16;
+    let mut terminated: bool = false;
+    for (i in 0..16) {
+        if (c_string[i] == 0) { length = i; terminated = true; break; }
+    }
+    if (!terminated) { free(c_string); return Err(InvalidSchema); }
+    for (i in 0..length) {
+        let byte: u8 = c_string[i];
+        if (byte < 32 || byte > 126) { free(c_string); return Err(InvalidSchema); }
+    }
+    free(c_string);
+    return Ok(length);
+}
+
+fn fdo_copy_name(buffer: Span<u8>, base: u64, name: str) -> Result<u64, DataError> {
+    let length: u64 = fdo_name_length(name)?;
+    let field: Span<u8> = buffer[base..(base + 16)];
+    let mut field_ptr: *u8 = field.ptr;
+    let c_string: *u8 = str_to_cstr(name);
+    for (i in 0..16) { field_ptr[i] = 0; }
+    for (i in 0..length) { field_ptr[i] = c_string[i]; }
+    free(c_string);
+    return Ok(length);
+}
+
+fn fdo_name_matches(stored: Span<u8>, base: u64, expected: str) -> bool {
+    let field: Span<u8> = stored[base..(base + 16)];
+    let c_string: *u8 = str_to_cstr(expected);
+    let mut matches: bool = true;
+    let mut terminated: bool = false;
+    for (i in 0..16) {
+        let expected_byte: u8 = c_string[i];
+        if (expected_byte == 0) {
+            terminated = true;
+            for (j in i..16) { if (field.ptr[j] != 0) { matches = false; } }
+            break;
+        }
+        if (field.ptr[i] != expected_byte) { matches = false; break; }
+    }
+    free(c_string);
+    if (!terminated) { return false; }
+    return matches;
+}
+
+fn fdo_elements_equal(payload: Span<u8>, left: u64, right: u64, width: u64) -> bool {
+    let mut equal: bool = true;
+    for (i in 0..width) {
+        if (payload.ptr[left + i] != payload.ptr[right + i]) { equal = false; break; }
+    }
+    return equal;
+}
+
+// Copy one element between byte spans, optionally reversing the byte order.
+fn fdo_copy_element(source: Span<u8>, source_base: u64, destination: Span<u8>, destination_base: u64, width: u64, reverse: bool) {
+    let mut destination_ptr: *u8 = destination.ptr;
+    for (i in 0..width) {
+        if (reverse) { destination_ptr[destination_base + i] = source.ptr[source_base + width - 1 - i]; }
+        else { destination_ptr[destination_base + i] = source.ptr[source_base + i]; }
+    }
+}
+
+// Encode one column's payload into `work` in the file byte order. Raw
+// storage copies each host-order element with an optional per-element byte
+// reversal. Run-length encoding detects runs by exact host-order element
+// byte comparison (deterministic for every supported type) and stores
+// (count, element) pairs; it falls back to raw storage when the encoded
+// size would meet or exceed the raw size. work must hold at least
+// 16 * row_count bytes (the widest-column worst case).
+fn fdo_encode_column(
+    row_count: u64, width: u64, payload: Span<u8>, byte_offset: u64,
+    compression: FDOCompression, work: Span<u8>, file_little: bool
+) -> Result<FDOEncodedColumn, DataError> {
+    let host_little: bool = fdo_host_is_little_endian();
+    let reverse: bool = file_little != host_little;
+    let raw_bytes: u64 = row_count * width;
+    let mut use_run_length: bool = false;
+    match (compression) {
+        FdoRaw => { use_run_length = false; }
+        FdoRunLength => { use_run_length = true; }
+    }
+    if (!use_run_length) {
+        for (element in 0..row_count) {
+            fdo_copy_element(payload, byte_offset + element * width, work, element * width, width, reverse);
+        }
+        return Ok(FDOEncodedColumn { stored_size: raw_bytes, compressed: false });
+    }
+    let mut position: u64 = 0;
+    let mut index: u64 = 0;
+    while (index < row_count) {
+        let mut run: u64 = 1;
+        let mut extending: bool = true;
+        while (extending) {
+            if (index + run >= row_count) { extending = false; }
+            else {
+                if (fdo_elements_equal(payload, byte_offset + (index + run) * width, byte_offset + (index + run - 1) * width, width)) { run = run + 1; }
+                else { extending = false; }
+            }
+        }
+        fdo_store_u64(work, position, run, file_little);
+        fdo_copy_element(payload, byte_offset + index * width, work, position + 8, width, reverse);
+        position = position + 8 + width;
+        index = index + run;
+    }
+    if (position < raw_bytes) {
+        return Ok(FDOEncodedColumn { stored_size: position, compressed: true });
+    }
+    // run-length encoding would not shrink the column: store raw
+    for (element in 0..row_count) {
+        fdo_copy_element(payload, byte_offset + element * width, work, element * width, width, reverse);
+    }
+    return Ok(FDOEncodedColumn { stored_size: raw_bytes, compressed: false });
+}
+
+// Validate the schema + payload relationship exactly like
+// freshet_data::validate_record_batch: non-empty, aligned, in-bounds and
+// non-overlapping columns with usable names/units.
+pub fn fdo_validate_columns(
+    row_count: u64, columns: Span<FDOColumnSpec>, payload: Span<u8>
+) -> Result<u64, DataError> {
+    if (row_count == 0 || columns.len == 0) { return Err(InvalidSchema); }
+    for (i in 0..columns.len) {
+        let width: u64 = fdo_column_width(columns.ptr[i].data_type)?;
+        let name_length: Result<u64, DataError> = fdo_name_length(columns.ptr[i].name);
+        match (name_length) { Ok(value) => {} Err(error) => { return Err(InvalidSchema); } }
+        let unit_length: Result<u64, DataError> = fdo_name_length(columns.ptr[i].unit);
+        match (unit_length) { Ok(value) => {} Err(error) => { return Err(InvalidSchema); } }
+        if (columns.ptr[i].byte_offset % width != 0) { return Err(InvalidSchema); }
+        let bytes: u64 = row_count * width;
+        let end: u64 = columns.ptr[i].byte_offset + bytes;
+        if (end > payload.len) { return Err(InvalidSchema); }
+        for (j in (i + 1)..columns.len) {
+            let other_width: u64 = fdo_column_width(columns.ptr[j].data_type)?;
+            let other_bytes: u64 = row_count * other_width;
+            let other_end: u64 = columns.ptr[j].byte_offset + other_bytes;
+            if (columns.ptr[i].byte_offset < other_end && columns.ptr[j].byte_offset < end) { return Err(InvalidSchema); }
+        }
+    }
+    return Ok(row_count);
+}
+
+// Write a validated payload as an FDO v1 file. work must hold at least
+// 16 * row_count bytes; sizes, checksums and compress_flags must hold at
+// least columns.len entries each (they carry the first encoding pass into
+// the directory construction; the payload bytes are re-encoded for output).
+// Returns the total file size in bytes.
+pub fn fdo_write(
+    path: str, order: ByteOrder, row_count: u64,
+    columns: Span<FDOColumnSpec>, payload: Span<u8>,
+    work: Span<u8>, sizes: Span<u64>, checksums: Span<u64>, compress_flags: Span<u64>
+) -> Result<u64, DataError> {
+    fdo_validate_columns(row_count, columns, payload)?;
+    if (work.len < 16 * row_count) { return Err(DimensionMismatch); }
+    if (sizes.len < columns.len || checksums.len < columns.len || compress_flags.len < columns.len) { return Err(DimensionMismatch); }
+    let mut file_little: bool = true;
+    match (order) {
+        Native => { file_little = fdo_host_is_little_endian(); }
+        LittleEndian => { file_little = true; }
+        BigEndian => { file_little = false; }
+    }
+    let path_c: *u8 = str_to_cstr(path);
+    let handle: *void = fopen(path_c, str_to_cstr("wb"));
+    free(path_c);
+    if (handle == nil) { return Err(FileOpenFailed); }
+    // exactly one deferred close (see BinaryFile::binary_close)
+    defer fdo_close_quiet(handle);
+    // first encoding pass: sizes, flags and checksums for the directory
+    for (i in 0..columns.len) {
+        let width: u64 = fdo_column_width(columns.ptr[i].data_type)?;
+        let encoded: FDOEncodedColumn = fdo_encode_column(row_count, width, payload,
+            columns.ptr[i].byte_offset, columns.ptr[i].compression, work, file_little)?;
+        sizes.ptr[i] = encoded.stored_size;
+        if (encoded.compressed) { compress_flags.ptr[i] = 1; } else { compress_flags.ptr[i] = 0; }
+        let checksum: u64 = fdo_adler32(span(work.ptr, encoded.stored_size))?;
+        checksums.ptr[i] = checksum;
+    }
+    // header + directory
+    let directory_bytes: u64 = 80 * columns.len;
+    let metadata_bytes: u64 = 32 + directory_bytes;
+    let metadata: *u8 = malloc(u8, metadata_bytes);
+    defer free(metadata);
+    let metadata_span: Span<u8> = span(metadata, metadata_bytes);
+    let mut metadata_ptr: *u8 = metadata;
+    metadata_ptr[0] = 70; metadata_ptr[1] = 68; metadata_ptr[2] = 79; metadata_ptr[3] = 49;
+    metadata_ptr[4] = 1;
+    if (file_little) { metadata_ptr[5] = 76; } else { metadata_ptr[5] = 66; }
+    metadata_ptr[6] = 0;
+    metadata_ptr[7] = 0;
+    fdo_store_u64(metadata_span, 8, row_count, file_little);
+    fdo_store_u64(metadata_span, 16, columns.len, file_little);
+    let header_checksum: u64 = fdo_adler32(span(metadata, 24))?;
+    fdo_store_u64(metadata_span, 24, header_checksum, file_little);
+    let mut payload_offset: u64 = metadata_bytes;
+    for (i in 0..columns.len) {
+        let entry_base: u64 = 32 + 80 * i;
+        fdo_copy_name(metadata_span, entry_base, columns.ptr[i].name)?;
+        fdo_copy_name(metadata_span, entry_base + 16, columns.ptr[i].unit)?;
+        fdo_store_u64(metadata_span, entry_base + 32, fdo_type_code(columns.ptr[i].data_type)?, file_little);
+        fdo_store_u64(metadata_span, entry_base + 40, row_count, file_little);
+        fdo_store_u64(metadata_span, entry_base + 48, payload_offset, file_little);
+        fdo_store_u64(metadata_span, entry_base + 56, sizes.ptr[i], file_little);
+        fdo_store_u64(metadata_span, entry_base + 64, compress_flags.ptr[i], file_little);
+        fdo_store_u64(metadata_span, entry_base + 72, checksums.ptr[i], file_little);
+        payload_offset = payload_offset + sizes.ptr[i];
+    }
+    let written_metadata: usize = fwrite(metadata as *void, 1, metadata_bytes as usize, handle);
+    if ((written_metadata as u64) != metadata_bytes) { return Err(FileWriteFailed); }
+    if (ferror(handle) != 0) { return Err(FileWriteFailed); }
+    // second encoding pass: emit each column's stored bytes
+    for (i in 0..columns.len) {
+        let width: u64 = fdo_column_width(columns.ptr[i].data_type)?;
+        let encoded: FDOEncodedColumn = fdo_encode_column(row_count, width, payload,
+            columns.ptr[i].byte_offset, columns.ptr[i].compression, work, file_little)?;
+        if (encoded.stored_size != sizes.ptr[i]) { return Err(NonFiniteResult); }
+        let written: usize = fwrite(work.ptr as *void, 1, encoded.stored_size as usize, handle);
+        if ((written as u64) != encoded.stored_size) { return Err(FileWriteFailed); }
+        if (ferror(handle) != 0) { return Err(FileWriteFailed); }
+    }
+    let flushed: i32 = fflush(handle);
+    if (flushed != 0) { return Err(FileWriteFailed); }
+    return Ok(payload_offset);
+}
+
+// A void helper usable in defer: closes a raw handle exactly once per call.
+fn fdo_close_quiet(handle: *void) {
+    if (handle != nil) {
+        fclose(handle);
+    }
+}
+
+pub fn fdo_close(borrowed mut reader: FDOReader) {
+    if (reader.handle != nil) {
+        fclose(reader.handle);
+        reader.handle = nil;
+    }
+}
+
+// Read and validate the fixed header: magic, version, byte-order marker,
+// dimensions and header checksum. The directory is checked lazily, column
+// by column, by fdo_read_column/fdo_verify_file.
+pub fn fdo_open_read(path: str) -> Result<FDOReader, DataError> {
+    let path_c: *u8 = str_to_cstr(path);
+    let handle: *void = fopen(path_c, str_to_cstr("rb"));
+    free(path_c);
+    if (handle == nil) { return Err(FileOpenFailed); }
+    let header: *u8 = malloc(u8, 32);
+    defer free(header);
+    let header_span: Span<u8> = span(header, 32);
+    let byte_count: usize = fread(header as *void, 1, 32, handle);
+    if (byte_count != 32) { fclose(handle); return Err(FileReadFailed); }
+    if (ferror(handle) != 0) { fclose(handle); return Err(FileReadFailed); }
+    if (header[0] != 70 || header[1] != 68 || header[2] != 79 || header[3] != 49) { fclose(handle); return Err(InvalidFormat); }
+    if (header[4] != 1) { fclose(handle); return Err(InvalidFormat); }
+    let mut file_little: bool = true;
+    if (header[5] == 76) { file_little = true; }
+    else if (header[5] == 66) { file_little = false; }
+    else { fclose(handle); return Err(InvalidFormat); }
+    let row_count: u64 = fdo_load_u64(header_span, 8, file_little);
+    let column_count: u64 = fdo_load_u64(header_span, 16, file_little);
+    let stored_checksum: u64 = fdo_load_u64(header_span, 24, file_little);
+    let computed_checksum: u64 = fdo_adler32(span(header, 24))?;
+    if (stored_checksum != computed_checksum) { fclose(handle); return Err(InvalidFormat); }
+    if (row_count == 0 || column_count == 0) { fclose(handle); return Err(InvalidSchema); }
+    return Ok(FDOReader { handle: handle, row_count: row_count, column_count: column_count, file_is_little_endian: file_little });
+}
+
+pub fn fdo_row_count(borrowed reader: FDOReader) -> u64 { return reader.row_count; }
+pub fn fdo_column_count(borrowed reader: FDOReader) -> u64 { return reader.column_count; }
+
+// Load one 80-byte directory entry by absolute fseek (SEEK_SET = 0).
+fn fdo_read_entry(handle: *void, column: u64, entry: *u8) -> Result<u64, DataError> {
+    let seek_offset: i64 = (32 + 80 * column) as i64;
+    let moved: i32 = fseek(handle, seek_offset, 0);
+    if (moved != 0) { return Err(FileReadFailed); }
+    let byte_count: usize = fread(entry as *void, 1, 80, handle);
+    if (byte_count != 80) { return Err(TruncatedBlock); }
+    if (ferror(handle) != 0) { return Err(FileReadFailed); }
+    return Ok(80);
+}
+
+// Read and decode one column: the directory entry must match the expected
+// type/name/unit and the stored payload must checksum correctly. `out`
+// receives row_count host-order elements at the column width (callers
+// place it at the column's payload offset and view it through the record
+// batch accessors). `work` must hold at least 16 * row_count bytes.
+pub fn fdo_read_column(
+    borrowed mut reader: FDOReader, column: u64,
+    expected_type: ColumnType, expected_name: str, expected_unit: str,
+    out: Span<u8>, work: Span<u8>
+) -> Result<u64, DataError> {
+    if (column >= reader.column_count) { return Err(InvalidSchema); }
+    let width: u64 = fdo_column_width(expected_type)?;
+    let expected_bytes: u64 = reader.row_count * width;
+    if (out.len != expected_bytes) { return Err(DimensionMismatch); }
+    if (work.len < 16 * reader.row_count) { return Err(DimensionMismatch); }
+    if (reader.handle == nil) { return Err(FileReadFailed); }
+    let entry: *u8 = malloc(u8, 80);
+    defer free(entry);
+    let read_entry: Result<u64, DataError> = fdo_read_entry(reader.handle, column, entry);
+    match (read_entry) { Ok(count) => {} Err(error) => { return Err(error); } }
+    let entry_span: Span<u8> = span(entry, 80);
+    let file_little: bool = reader.file_is_little_endian;
+    let type_code: u64 = fdo_load_u64(entry_span, 32, file_little);
+    if (type_code != fdo_type_code(expected_type)?) { return Err(InvalidSchema); }
+    let element_count: u64 = fdo_load_u64(entry_span, 40, file_little);
+    if (element_count != reader.row_count) { return Err(InvalidSchema); }
+    if (!fdo_name_matches(entry_span, 0, expected_name)) { return Err(InvalidSchema); }
+    if (!fdo_name_matches(entry_span, 16, expected_unit)) { return Err(InvalidSchema); }
+    let payload_offset: u64 = fdo_load_u64(entry_span, 48, file_little);
+    let stored_size: u64 = fdo_load_u64(entry_span, 56, file_little);
+    let compression_flag: u64 = fdo_load_u64(entry_span, 64, file_little);
+    let stored_checksum: u64 = fdo_load_u64(entry_span, 72, file_little);
+    if (stored_size > 16 * reader.row_count) { return Err(InvalidSchema); }
+    if (stored_size > work.len) { return Err(DimensionMismatch); }
+    let directory_end: u64 = 32 + 80 * reader.column_count;
+    if (payload_offset < directory_end) { return Err(InvalidSchema); }
+    if (compression_flag != 0 && compression_flag != 1) { return Err(InvalidSchema); }
+    // fetch and checksum the stored payload
+    let moved: i32 = fseek(reader.handle, payload_offset as i64, 0);
+    if (moved != 0) { return Err(FileReadFailed); }
+    let byte_count: usize = fread(work.ptr as *void, 1, stored_size as usize, reader.handle);
+    if ((byte_count as u64) != stored_size) { return Err(TruncatedBlock); }
+    if (ferror(reader.handle) != 0) { return Err(FileReadFailed); }
+    let computed_checksum: u64 = fdo_adler32(span(work.ptr, stored_size))?;
+    if (computed_checksum != stored_checksum) { return Err(ChecksumMismatch); }
+    // decode into host-order output bytes
+    let host_little: bool = fdo_host_is_little_endian();
+    let reverse: bool = file_little != host_little;
+    if (compression_flag == 0) {
+        for (element in 0..reader.row_count) {
+            fdo_copy_element(work, element * width, out, element * width, width, reverse);
+        }
+    } else {
+        let mut position: u64 = 0;
+        let mut produced: u64 = 0;
+        while (position < stored_size) {
+            if (position + 8 + width > stored_size) { return Err(TruncatedBlock); }
+            let run: u64 = fdo_load_u64(work, position, file_little);
+            if (run == 0 || produced + run > reader.row_count) { return Err(InvalidSchema); }
+            for (copy in 0..run) {
+                fdo_copy_element(work, position + 8, out, produced * width, width, reverse);
+                produced = produced + 1;
+            }
+            position = position + 8 + width;
+        }
+        if (produced != reader.row_count) { return Err(InvalidSchema); }
+    }
+    return Ok(reader.row_count);
+}
+
+// Validate an FDO file end-to-end without decoding values into a payload:
+// header, every directory entry's structure and every stored payload's
+// checksum. Returns the verified column count.
+pub fn fdo_verify_file(path: str, work: Span<u8>) -> Result<u64, DataError> {
+    let opened: Result<FDOReader, DataError> = fdo_open_read(path);
+    let mut reader: FDOReader = FDOReader { handle: nil, row_count: 0, column_count: 0, file_is_little_endian: true };
+    match (opened) { Ok(value) => { reader = value; } Err(error) => { return Err(error); } }
+    defer fdo_close(&mut reader);
+    if (work.len < 16 * reader.row_count) { return Err(DimensionMismatch); }
+    let entry: *u8 = malloc(u8, 80);
+    defer free(entry);
+    let entry_span: Span<u8> = span(entry, 80);
+    let directory_end: u64 = 32 + 80 * reader.column_count;
+    for (column in 0..reader.column_count) {
+        let read_entry: Result<u64, DataError> = fdo_read_entry(reader.handle, column, entry);
+        match (read_entry) { Ok(count) => {} Err(error) => { return Err(error); } }
+        let file_little: bool = reader.file_is_little_endian;
+        let type_code: u64 = fdo_load_u64(entry_span, 32, file_little);
+        if (type_code > 3) { return Err(InvalidSchema); }
+        let element_count: u64 = fdo_load_u64(entry_span, 40, file_little);
+        if (element_count != reader.row_count) { return Err(InvalidSchema); }
+        let payload_offset: u64 = fdo_load_u64(entry_span, 48, file_little);
+        let stored_size: u64 = fdo_load_u64(entry_span, 56, file_little);
+        let compression_flag: u64 = fdo_load_u64(entry_span, 64, file_little);
+        let stored_checksum: u64 = fdo_load_u64(entry_span, 72, file_little);
+        if (stored_size > 16 * reader.row_count || stored_size > work.len) { return Err(InvalidSchema); }
+        if (payload_offset < directory_end) { return Err(InvalidSchema); }
+        if (compression_flag != 0 && compression_flag != 1) { return Err(InvalidSchema); }
+        // the 16-byte name/unit fields must be NUL-terminated printable ASCII
+        let mut name_ok: bool = false;
+        let mut unit_ok: bool = false;
+        for (i in 0..16) { if (entry[i] == 0) { name_ok = true; } }
+        for (i in 0..16) { if (entry[i + 16] == 0) { unit_ok = true; } }
+        if (!name_ok || !unit_ok) { return Err(InvalidSchema); }
+        for (i in 0..16) {
+            if (entry[i] != 0 && (entry[i] < 32 || entry[i] > 126)) { return Err(InvalidSchema); }
+            if (entry[i + 16] != 0 && (entry[i + 16] < 32 || entry[i + 16] > 126)) { return Err(InvalidSchema); }
+        }
+        let moved: i32 = fseek(reader.handle, payload_offset as i64, 0);
+        if (moved != 0) { return Err(FileReadFailed); }
+        let byte_count: usize = fread(work.ptr as *void, 1, stored_size as usize, reader.handle);
+        if ((byte_count as u64) != stored_size) { return Err(TruncatedBlock); }
+        if (ferror(reader.handle) != 0) { return Err(FileReadFailed); }
+        let computed_checksum: u64 = fdo_adler32(span(work.ptr, stored_size))?;
+        if (computed_checksum != stored_checksum) { return Err(ChecksumMismatch); }
+    }
+    return Ok(reader.column_count);
+}

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(FreshetScientific VERSION 0.2.1 LANGUAGES NONE)
+project(FreshetScientific VERSION 0.3.0 LANGUAGES NONE)
 
 include(CTest)
 

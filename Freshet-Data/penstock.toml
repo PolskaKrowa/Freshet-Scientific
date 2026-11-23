@@ -3,7 +3,7 @@ name = "freshet_data"
 
 [target]
 type = "static-lib"
-src = ["src/freshet_data.fsht"]
+src = ["src/freshet_data.fsht", "src/fdo_format.fsht"]
 
 [build]
 opt = 3

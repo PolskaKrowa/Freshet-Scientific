@@ -4,10 +4,11 @@ Bounded-memory, column-oriented data processing for large Freshet workloads.
 The design favours caller-owned chunk buffers and composable numerical
 accumulators over loading a whole dataset into memory.
 
-## Public module
+## Public modules
 
 ```freshet
 import freshet_data;
+import fdo_format; // FDO (Freshet-Data Optimised) file format
 ```
 
 ## Statistics and transforms
@@ -61,7 +62,53 @@ addresses through integer casts. The caller owns the payload and must keep it
 alive and correctly aligned for the lifetime of every returned column view.
 
 This is a columnar view/descriptor foundation, not yet an owning dataset
-catalogue, compression layer or query planner.
+catalogue or query planner.
+
+## FDO (Freshet-Data Optimised) file format
+
+`fdo_format` writes and reads a self-describing, checksummed, optionally
+compressed container for validated record-batch payloads:
+
+- **Magic identifier and version:** the first four bytes are the literal
+  `FDO1`; byte 4 is the format version (1). A foreign or truncated stream is
+  rejected with `InvalidFormat` before anything else is trusted.
+- **Byte order:** byte 5 is the file byte-order marker (`L` or `B`); every
+  multi-byte field of the header, directory and payloads uses that order.
+  Serialisation and assembly use division/modulo and multiplication only
+  (no bit-shift or bitwise operators).
+- **Dimensions:** the header stores the row and column counts; the
+  directory stores each column's element count (equal to the row count in
+  v1).
+- **Column schema:** every 80-byte directory entry carries a NUL-padded
+  printable-ASCII name (max 15 characters) and unit field, a data type code
+  (`f64`, `f32`, `i64` or `u64`), the element count, the payload offset, the
+  stored size, the compression flag and the payload checksum. Reading is
+  strict: the caller declares the expected type, name and unit, and
+  mismatches report `InvalidSchema` rather than coercing.
+- **Offsets and sizes:** payload offsets are absolute from the file start,
+  begin after the directory and are validated against it; stored sizes are
+  bounded by the 16-per-row sanity limit.
+- **Checksums:** the header carries an Adler-32 (`fdo_adler32`, exported)
+  over its first 24 bytes and every payload carries one over its stored
+  bytes; mismatches report `ChecksumMismatch`. Adler-32 detects every
+  single-byte change; it is not a cryptographic digest.
+- **Binary payloads:** each column's elements are stored in the file byte
+  order; `fdo_read_column` returns host-order bytes sized for the record
+  batch accessors, so round-tripped payloads re-enter the zero-copy views
+  directly.
+- **Optional compression:** `FdoRunLength` stores `(run count, element)`
+  pairs per column (runs detected by exact element byte comparison); a
+  column whose encoding would not shrink falls back to raw storage and the
+  directory records the actual flag. `FdoRaw` stores plain elements.
+
+`fdo_write` takes the caller payload plus three reusable u64 workspaces
+`(sizes, checksums, compress_flags)` and one byte workspace of at least
+`16 * row_count`; it returns the total file size. `fdo_open_read`/
+`fdo_close` follow the exactly-once close contract of `BinaryFile`.
+`fdo_read_column` seeks and checksums the stored payload before decoding
+and `fdo_verify_file` validates the whole file without materialising a
+payload. The format is a container: value-level finiteness is the caller's
+job, exactly like record batches.
 
 ## Text streaming
 
@@ -76,7 +123,19 @@ module so standalone project builds can resolve `import io;` when the compiler
 installation does not ship its module directory. Its `Reader` and `IoError`
 ABI is the Penstock standard-library ABI. See `../THIRD_PARTY_NOTICES.md`.
 
+## Example
+
+See [`examples/binary_transform.fsht`](examples/binary_transform.fsht) for
+the reusable binary transform pipeline and
+[`examples/fdo_roundtrip.fsht`](examples/fdo_roundtrip.fsht) for a complete
+FDO write/verify/read round trip with compression.
+
 ## Build and test
+
+`fdo_format.fsht` is a second compilation root of the static library (the
+project's `penstock.toml` lists both `src/freshet_data.fsht` and
+`src/fdo_format.fsht`), so the archive exports both modules without a
+circular module import.
 
 ```sh
 penstock build .

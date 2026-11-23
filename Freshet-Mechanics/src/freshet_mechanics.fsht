@@ -9,5 +9,6 @@ import beams;
 import trusses;
 import stress;
 import fem;
+import structural;
 
-pub fn version() -> str { return "0.2.1"; }
+pub fn version() -> str { return "0.3.0"; }

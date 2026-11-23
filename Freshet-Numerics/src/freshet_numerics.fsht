@@ -643,3 +643,274 @@ pub fn conjugate_gradient_f64(
     let operator: DenseMatrixF64 = DenseMatrixF64 { rows: n, cols: n, values: a };
     return conjugate_gradient_operator_f64(operator, n, b, x, residual, direction, product, max_iterations, tolerance);
 }
+
+// ---------------------------------------------------------------------------
+// 0.3.0 additions: validated matrix representations, canonical CSR, and
+// restarted GMRES with a PreconditionerF64 (identity or otherwise).
+// ---------------------------------------------------------------------------
+
+// Validates the dense matrix view once so callers can reuse it for many
+// products/solves: shape/length agreement plus finite values.
+pub fn dense_matrix_validate_f64(matrix: DenseMatrixF64) -> Result<u64, NumericsError> {
+    if (matrix.rows == 0 || matrix.cols == 0) { return Err(InvalidDimension); }
+    let required: u64 = checked_product_size(checked_mul(matrix.rows, matrix.cols))?;
+    if (matrix.values.len != required) { return Err(DimensionMismatch); }
+    validate_finite_span(matrix.values)?;
+    return Ok(required);
+}
+
+// Structural symmetry of a square dense matrix by exact mirrored-entry
+// equality. This is a validation/inspection kernel, not a tolerance-based
+// near-symmetry test; callers wanting a tolerance must compare themselves.
+pub fn dense_matrix_is_symmetric_f64(matrix: DenseMatrixF64) -> Result<bool, NumericsError> {
+    if (matrix.rows != matrix.cols) { return Err(DimensionMismatch); }
+    dense_matrix_validate_f64(matrix)?;
+    let mut values_ptr: *f64 = matrix.values.ptr;
+    for (row in 0..matrix.rows) {
+        for (col in (row + 1)..matrix.cols) {
+            if (values_ptr[row * matrix.cols + col] != values_ptr[col * matrix.cols + row]) { return Ok(false); }
+        }
+    }
+    return Ok(true);
+}
+
+// Canonicalises a CSR matrix: within every row the stored entries are
+// insertion-sorted by column index and duplicates are summed. The merged
+// matrix has exactly one entry per (row, column) pair, which is the
+// representation the CSR Jacobi preconditioner and future incomplete
+// factorisations expect. Output buffers must have rows+1 and nnz capacity;
+// the returned value is the merged nonzero count (callers shrink the CSR
+// view's nnz field to it). Duplicate sums are checked for finiteness.
+pub fn csr_merge_duplicates_f64(
+    matrix: CSRMatrixF64,
+    row_offsets_out: Span<u64>, col_indices_out: Span<u64>, values_out: Span<f64>
+) -> Result<u64, NumericsError> {
+    csr_validate(matrix)?;
+    let expected_offsets: u64 = checked_product_size(checked_add(matrix.rows, 1))?;
+    if (row_offsets_out.len != expected_offsets || col_indices_out.len < matrix.nnz || values_out.len < matrix.nnz) { return Err(DimensionMismatch); }
+    let mut offsets_ptr: *u64 = row_offsets_out.ptr;
+    let mut columns_ptr: *u64 = col_indices_out.ptr;
+    let mut merged_ptr: *f64 = values_out.ptr;
+    offsets_ptr[0] = 0;
+    let mut merged: u64 = 0;
+    for (row in 0..matrix.rows) {
+        let start: u64 = matrix.row_offsets[row];
+        let end: u64 = matrix.row_offsets[row + 1];
+        let row_base: u64 = merged;
+        let mut width: u64 = 0;
+        for (source in start..end) {
+            let column: u64 = matrix.col_indices.ptr[source];
+            let value: f64 = matrix.values.ptr[source];
+            // insertion into the sorted output segment [row_base, row_base+width)
+            let mut position: u64 = row_base + width;
+            while (position > row_base && columns_ptr[position - 1] > column) {
+                columns_ptr[position] = columns_ptr[position - 1];
+                merged_ptr[position] = merged_ptr[position - 1];
+                position = position - 1;
+            }
+            if (position > row_base && columns_ptr[position - 1] == column) {
+                let sum: f64 = merged_ptr[position - 1] + value;
+                if (!finite_f64(sum)) { return Err(NonFiniteResult); }
+                merged_ptr[position - 1] = sum;
+            } else {
+                columns_ptr[position] = column;
+                merged_ptr[position] = value;
+                width = width + 1;
+            }
+        }
+        merged = merged + width;
+        offsets_ptr[row + 1] = merged;
+    }
+    return Ok(merged);
+}
+
+// Numerical symmetry check for CSR matrices (square only). Works directly on
+// duplicate-carrying matrices: the (i, j) value is the within-row sum of the
+// duplicates and must equal the summed (j, i) value. Cost is O(nnz * row
+// length); this is an inspection/validation kernel, not a hot path.
+pub fn csr_is_symmetric_f64(matrix: CSRMatrixF64) -> Result<bool, NumericsError> {
+    csr_validate(matrix)?;
+    if (matrix.rows != matrix.cols) { return Err(DimensionMismatch); }
+    for (row in 0..matrix.rows) {
+        for (entry in matrix.row_offsets[row]..matrix.row_offsets[row + 1]) {
+            let column: u64 = matrix.col_indices.ptr[entry];
+            let value: f64 = matrix.values.ptr[entry];
+            let mut mirror: f64 = 0.0;
+            for (other in matrix.row_offsets[column]..matrix.row_offsets[column + 1]) {
+                if (matrix.col_indices.ptr[other] == row) { mirror = mirror + matrix.values.ptr[other]; }
+            }
+            if (mirror != value) { return Ok(false); }
+        }
+    }
+    return Ok(true);
+}
+
+// Identity preconditioner: z = r. Paired with preconditioned_gmres_f64 it
+// yields plain (unpreconditioned) GMRES without a second solver variant.
+pub struct IdentityPreconditionerF64 { }
+
+pub impl PreconditionerF64 for IdentityPreconditionerF64 {
+    fn apply(preconditioner: Self, residual: Span<f64>, output: Span<f64>) -> Result<u64, NumericsError> {
+        if (residual.len != output.len) { return Err(DimensionMismatch); }
+        validate_finite_span(residual)?;
+        let mut output_ptr: *f64 = output.ptr;
+        parfor (i in 0..residual.len) { output_ptr[i] = residual.ptr[i]; }
+        validate_finite_result_span(output)?;
+        return Ok(residual.len);
+    }
+}
+
+// Right-preconditioned restarted GMRES(m) for general (possibly nonsymmetric)
+// operators. The Arnoldi process uses modified Gram-Schmidt and the least
+// squares minimisation uses Givens rotations, so no normal equations are
+// formed. The solve is equivalent to A*M^{-1} y = b with x recovered through
+// x += M^{-1} y, which keeps the reported residual a true residual of the
+// original system.
+//
+// Workspaces (all caller-owned, none of which may alias each other or x/b):
+//   krylov        (restart + 1) * n   Krylov basis V_0..V_restart. V_0 doubles
+//                                       as the residual buffer between restarts
+//                                       and as the z = M^{-1} t output buffer.
+//   hessenberg    (restart + 1) * restart  upper Hessenberg coefficients.
+//   cosines       restart             Givens cosines.
+//   sines         restart             Givens sines.
+//   givens_rhs    restart + 1         rotated right-hand-side coefficients.
+//   y_coefficients restart            triangular solve coefficients.
+//   update        n                   z = M^{-1} v_j inside Arnoldi, the
+//                                       V y accumulation and the residual
+//                                       recomputation.
+// The returned residual_norm is recomputed from b - A x rather than trusted
+// from the least squares estimate, so the report is directly checkable.
+pub fn preconditioned_gmres_f64<T: LinearOperatorF64, P: PreconditionerF64>(
+    operator: T, preconditioner: P, n: u64, b: Span<f64>, x: Span<f64>,
+    krylov: Span<f64>, hessenberg: Span<f64>, cosines: Span<f64>, sines: Span<f64>,
+    givens_rhs: Span<f64>, y_coefficients: Span<f64>, update: Span<f64>,
+    restart: u64, max_iterations: u64, tolerance: f64
+) -> Result<KrylovReport, NumericsError> {
+    if (n == 0) { return Err(InvalidDimension); }
+    if (restart == 0) { return Err(InvalidDimension); }
+    if (!finite_f64(tolerance) || tolerance < 0.0) { return Err(InvalidTolerance); }
+    let plus_one: u64 = checked_product_size(checked_add(restart, 1))?;
+    let basis_required: u64 = checked_product_size(checked_mul(plus_one, n))?;
+    let hessenberg_required: u64 = checked_product_size(checked_mul(plus_one, restart))?;
+    if (b.len != n || x.len != n || krylov.len != basis_required || hessenberg.len != hessenberg_required ||
+        cosines.len != restart || sines.len != restart || givens_rhs.len != plus_one ||
+        y_coefficients.len != restart || update.len != n) { return Err(DimensionMismatch); }
+    validate_finite_span(b)?;
+    validate_finite_span(x)?;
+    let mut krylov_ptr: *f64 = krylov.ptr;
+    let mut hessenberg_ptr: *f64 = hessenberg.ptr;
+    let mut cosines_ptr: *f64 = cosines.ptr;
+    let mut sines_ptr: *f64 = sines.ptr;
+    let mut givens_ptr: *f64 = givens_rhs.ptr;
+    let mut y_ptr: *f64 = y_coefficients.ptr;
+    let mut x_ptr: *f64 = x.ptr;
+    let mut update_ptr: *f64 = update.ptr;
+    let basis: Span<f64> = span(krylov_ptr, n);
+    let stride: u64 = plus_one;
+    let mut total_inner: u64 = 0;
+    let mut converged: bool = false;
+    let mut residual_norm: f64 = 1.0e300;
+    while (!converged && total_inner < max_iterations) {
+        // residual r = b - A x, written into the V_0 slot.
+        apply_operator_checked(operator, x, update, n)?;
+        for (i in 0..n) { krylov_ptr[i] = b.ptr[i] - update_ptr[i]; }
+        validate_finite_result_span(basis)?;
+        let beta: f64 = norm2_f64(basis)?;
+        if (beta <= tolerance) {
+            residual_norm = beta;
+            converged = true;
+            break;
+        }
+        let inverse_beta: f64 = 1.0 / beta;
+        if (!finite_f64(inverse_beta)) { return Err(NonFiniteResult); }
+        for (i in 0..n) { krylov_ptr[i] = krylov_ptr[i] * inverse_beta; }
+        for (j in 0..(restart + 1)) { givens_ptr[j] = 0.0; }
+        givens_ptr[0] = beta;
+        let mut stopped: u64 = restart;
+        for (j in 0..restart) {
+            if (total_inner >= max_iterations) { stopped = j; break; }
+            // w = A * M^{-1} * v_j: z into update, w into the V_{j+1} slot.
+            let vj: Span<f64> = krylov[j * n..(j * n + n)];
+            let vnext: Span<f64> = krylov[(j + 1) * n..((j + 1) * n + n)];
+            apply_preconditioner_checked(preconditioner, vj, update, n)?;
+            apply_operator_checked(operator, update, vnext, n)?;
+            // modified Gram-Schmidt against V_0..V_j.
+            for (i in 0..(j + 1)) {
+                let vi: Span<f64> = krylov[i * n..(i * n + n)];
+                let coefficient: f64 = dot_f64(vnext, vi)?;
+                if (!finite_f64(coefficient)) { return Err(NonFiniteResult); }
+                hessenberg_ptr[j * stride + i] = coefficient;
+                for (k in 0..n) {
+                    let value: f64 = krylov_ptr[(j + 1) * n + k] - coefficient * krylov_ptr[i * n + k];
+                    krylov_ptr[(j + 1) * n + k] = value;
+                }
+            }
+            let next_norm: f64 = norm2_f64(vnext)?;
+            hessenberg_ptr[j * stride + j + 1] = next_norm;
+            if (next_norm == 0.0) {
+                // lucky breakdown: the Krylov space already spans the exact
+                // solution. Skipping this column's rotation is equivalent
+                // because it would act as the identity up to a sign that
+                // cancels in the triangular solve.
+                stopped = j + 1;
+                break;
+            }
+            let inverse_norm: f64 = 1.0 / next_norm;
+            if (!finite_f64(inverse_norm)) { return Err(NonFiniteResult); }
+            for (k in 0..n) { krylov_ptr[(j + 1) * n + k] = krylov_ptr[(j + 1) * n + k] * inverse_norm; }
+            // apply the accumulated rotations to the new column.
+            let column: u64 = j * stride;
+            for (i in 0..j) {
+                let upper: f64 = hessenberg_ptr[column + i];
+                let lower: f64 = hessenberg_ptr[column + i + 1];
+                hessenberg_ptr[column + i] = cosines_ptr[i] * upper + sines_ptr[i] * lower;
+                hessenberg_ptr[column + i + 1] = 0.0 - sines_ptr[i] * upper + cosines_ptr[i] * lower;
+            }
+            let diagonal: f64 = hessenberg_ptr[column + j];
+            let subdiagonal: f64 = hessenberg_ptr[column + j + 1];
+            let delta: f64 = sqrt(diagonal * diagonal + subdiagonal * subdiagonal);
+            if (delta == 0.0) { return Err(SolverBreakdown); }
+            cosines_ptr[j] = diagonal / delta;
+            sines_ptr[j] = subdiagonal / delta;
+            if (!finite_f64(cosines_ptr[j]) || !finite_f64(sines_ptr[j])) { return Err(NonFiniteResult); }
+            hessenberg_ptr[column + j] = cosines_ptr[j] * diagonal + sines_ptr[j] * subdiagonal;
+            hessenberg_ptr[column + j + 1] = 0.0;
+            givens_ptr[j + 1] = 0.0 - sines_ptr[j] * givens_ptr[j];
+            givens_ptr[j] = cosines_ptr[j] * givens_ptr[j];
+            total_inner = total_inner + 1;
+            let estimate: f64 = givens_ptr[j + 1];
+            if (!finite_f64(estimate)) { return Err(NonFiniteResult); }
+            if (fabs(estimate) <= tolerance) { stopped = j + 1; break; }
+        }
+        // triangular solve for y of size `stopped`, then x += M^{-1} (V y).
+        let mut row_index: u64 = stopped;
+        while (row_index > 0) {
+            row_index = row_index - 1;
+            let mut accumulated: f64 = givens_ptr[row_index];
+            for (column_index in (row_index + 1)..stopped) {
+                accumulated = accumulated - hessenberg_ptr[column_index * stride + row_index] * y_ptr[column_index];
+            }
+            let diagonal: f64 = hessenberg_ptr[row_index * stride + row_index];
+            if (diagonal == 0.0) { return Err(SolverBreakdown); }
+            let coefficient: f64 = accumulated / diagonal;
+            if (!finite_f64(coefficient)) { return Err(NonFiniteResult); }
+            y_ptr[row_index] = coefficient;
+        }
+        // t = sum_i y_i v_i into update, then z = M^{-1} t into the V_0 slot.
+        for (i in 0..n) { update_ptr[i] = 0.0; }
+        for (i in 0..stopped) {
+            let coefficient: f64 = y_ptr[i];
+            for (k in 0..n) { update_ptr[k] = update_ptr[k] + coefficient * krylov_ptr[i * n + k]; }
+        }
+        apply_preconditioner_checked(preconditioner, update, basis, n)?;
+        parfor (i in 0..n) { x_ptr[i] = x_ptr[i] + krylov_ptr[i]; }
+        validate_finite_result_span(x)?;
+        // recompute the true residual norm rather than trusting the estimate.
+        apply_operator_checked(operator, x, update, n)?;
+        for (i in 0..n) { update_ptr[i] = b.ptr[i] - update_ptr[i]; }
+        residual_norm = norm2_f64(update)?;
+        if (residual_norm <= tolerance) { converged = true; }
+    }
+    return Ok(KrylovReport { iterations: total_inner, residual_norm: residual_norm, converged: converged });
+}

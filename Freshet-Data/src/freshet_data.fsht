@@ -25,7 +25,9 @@ pub enum DataError {
     FileWriteFailed,
     TruncatedBlock,
     InvalidHistogram,
-    InvalidSchema
+    InvalidSchema,
+    InvalidFormat,
+    ChecksumMismatch
 }
 
 pub enum ByteOrder { Native, LittleEndian, BigEndian }

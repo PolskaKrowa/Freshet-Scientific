@@ -33,3 +33,23 @@ This release establishes representative correctness workloads across all four
 sub-libraries, but does not yet publish performance benchmark results. The
 performance harness and measurement baselines are scheduled for the next
 release; no throughput or scaling claim is made by this release.
+
+## 0.3.0 additions
+
+The 0.3.0 kernels follow the same rules; two additional notes:
+
+- The multigrid transfer kernels (block-average restriction,
+  piecewise-constant prolongation and the accumulated coarse-grid
+  correction) are `parfor` kernels whose iterations write distinct cells and
+  index only existing neighbours, so they perform no per-cell division or
+  modulo (the F0402 pattern avoided since 0.1.2). The V-cycle itself walks
+  levels with an explicit descent/ascent loop over the caller-owned level
+  workspace; no level metadata is stored beyond sizes recoverable by exact
+  doubling.
+- The FDO writer intentionally encodes every run-length column twice (once
+  to size and checksum the directory entry, once to emit the payload) rather
+  than caching encoded bytes, keeping the encoding workspace at
+  16 * row_count bytes instead of the total stored size. The FDO reader
+  validates and checksums the stored payload before decoding. Neither path
+  is performance-benchmarked yet; the correctness workloads above are the
+  basis for future throughput claims.

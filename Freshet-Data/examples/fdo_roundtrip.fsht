@@ -1,0 +1,83 @@
+// FDO (Freshet-Data Optimised) columnar file round trip: write a validated
+// four-column payload with per-column compression choices, verify the file
+// end-to-end (magic, version, byte-order marker, header checksum, every
+// payload checksum) and read each column back into record-batch views.
+import freshet_data;
+import fdo_format;
+
+fn run_fdo_roundtrip() {
+    let row_count: u64 = 4;
+    let payload: *u8 = malloc(u8, 112);
+    let work: *u8 = malloc(u8, 64);
+    defer free(payload); defer free(work);
+    // time [s], zone id, steady flag and speed [m/s] columns
+    let mut doubles: *f64 = payload as *f64;
+    doubles[0] = 0.0; doubles[1] = 0.5; doubles[2] = 1.0; doubles[3] = 1.5;
+    let mut signed: *i64 = payload as *i64;
+    signed[4] = 7; signed[5] = 7; signed[6] = 7; signed[7] = 8;
+    let mut unsigned: *u64 = payload as *u64;
+    unsigned[8] = 1; unsigned[9] = 1; unsigned[10] = 1; unsigned[11] = 1;
+    let mut floats: *f32 = payload as *f32;
+    floats[24] = 1.5; floats[25] = 2.5; floats[26] = 3.5; floats[27] = 4.5;
+    let specs: [FDOColumnSpec; 4] = [
+        FDOColumnSpec { name: "time", unit: "s", data_type: F64, byte_offset: 0, compression: FdoRaw },
+        FDOColumnSpec { name: "zone", unit: "", data_type: I64, byte_offset: 32, compression: FdoRunLength },
+        FDOColumnSpec { name: "flag", unit: "", data_type: U64, byte_offset: 64, compression: FdoRunLength },
+        FDOColumnSpec { name: "speed", unit: "m/s", data_type: F32, byte_offset: 96, compression: FdoRunLength }
+    ];
+    let mut sizes: [u64; 4] = [0, 0, 0, 0];
+    let mut checksums: [u64; 4] = [0, 0, 0, 0];
+    let mut compress_flags: [u64; 4] = [0, 0, 0, 0];
+    let written: Result<u64, DataError> = fdo_write(
+        "sensor_run.fdo", BigEndian, row_count, span(specs), span(payload, 112),
+        span(work, 64), span(sizes), span(checksums), span(compress_flags));
+    match (written) {
+        Ok(bytes) => {
+            print("wrote "); print_u64(bytes); print(" bytes");
+            print(" compressed flag column: "); print_u64(sizes[2]); print(" bytes (run-length)"); println();
+        }
+        Err(error) => { print("fdo write failed"); println(); return; }
+    }
+    let verified: Result<u64, DataError> = fdo_verify_file("sensor_run.fdo", span(work, 64));
+    match (verified) {
+        Ok(columns) => { print("verified "); print_u64(columns); print(" columns"); println(); }
+        Err(error) => { print("fdo verify failed"); println(); return; }
+    }
+    // read the run-length and raw columns back and view them as record batches
+    let opened: Result<FDOReader, DataError> = fdo_open_read("sensor_run.fdo");
+    let mut reader: FDOReader = FDOReader { handle: nil, row_count: 0, column_count: 0, file_is_little_endian: true };
+    match (opened) { Ok(value) => { reader = value; } Err(error) => { print("fdo open failed"); println(); return; } }
+    defer fdo_close(&mut reader);
+    let payload_span: Span<u8> = span(payload, 112);
+    let time_out: Span<u8> = payload_span[0..32];
+    let zone_out: Span<u8> = payload_span[32..64];
+    let read_time: Result<u64, DataError> = fdo_read_column(reader, 0, F64, "time", "s", time_out, span(work, 64));
+    let read_zone: Result<u64, DataError> = fdo_read_column(reader, 1, I64, "zone", "", zone_out, span(work, 64));
+    match (read_time) { Ok(rows) => {} Err(error) => { print("time read failed"); println(); return; } }
+    match (read_zone) { Ok(rows) => {} Err(error) => { print("zone read failed"); println(); return; } }
+    let schemas: [ColumnSchema; 2] = [
+        ColumnSchema { name: "time", data_type: F64, byte_offset: 0 },
+        ColumnSchema { name: "zone", data_type: I64, byte_offset: 32 }
+    ];
+    let batch: RecordBatchView = RecordBatchView { row_count: row_count, columns: span(schemas), payload: payload_span };
+    let times: Result<Span<f64>, DataError> = record_batch_f64_column(batch, 0);
+    match (times) {
+        Ok(values) => {
+            print("time [s]: "); print_f64(values[0], 3); print(" "); print_f64(values[1], 3);
+            print(" "); print_f64(values[2], 3); print(" "); print_f64(values[3], 3); println();
+        }
+        Err(error) => {}
+    }
+    let zones: Result<Span<i64>, DataError> = record_batch_i64_column(batch, 1);
+    match (zones) {
+        Ok(values) => {
+            print("zone ids: "); print_u64((values[0] as u64)); print(" "); print_u64((values[3] as u64)); println();
+        }
+        Err(error) => {}
+    }
+    io::remove("sensor_run.fdo");
+}
+
+fn main() {
+    run_fdo_roundtrip();
+}

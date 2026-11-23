@@ -26,6 +26,36 @@ import freshet_fluid;
   maximum initial and final divergence separately; the residual merge and
   the norm helpers are serial deterministic maxima (see the Freshet-Numerics
   README's floating-point min/max reduction note).
+- `mac_pressure_operator_apply_2d` exposes the pressure operator itself
+  (`A*p = neighbour_sum - diagonal*p + source`, the negative discrete
+  Laplacian) and `mac_pressure_diagonal_2d` its diagonal; these are the
+  shared kernels of the residual reports, the multigrid sweeps and the
+  conjugate-gradient projections.
+- `project_incompressible_mac_multigrid_2d` solves the same pressure Poisson
+  equation with geometric multigrid: a cell-centred 2:1 hierarchy whose
+  transfer pair is the boundary-blind piecewise-constant prolongation P and
+  the block-average restriction R = Pᵀ/4 (for which the rediscretised 2h
+  operator satisfies R·A·P = 2·A₂h exactly, including boundary rows). Each
+  V-cycle pre-smooths, restricts the defect, solves the coarse levels by
+  heavier smoothing, prolongates the coarse correction in parallel and
+  post-smooths; `mac_multigrid_level_count_2d` and
+  `mac_multigrid_workspace_requirement_2d` report the hierarchy depth and
+  workspace length, `mac_pressure_v_cycle_2d` is the reusable cycle and
+  `mac_restrict_full_weighting_2d`/`mac_prolongate_constant_2d` are the
+  standalone transfer kernels (the adjoint identity ⟨P e, r⟩ = 4⟨e, R r⟩
+  is regression-tested).
+- `project_incompressible_mac_pcg_2d` solves the pressure Poisson equation
+  with preconditioned conjugate gradient on L = -A (which is symmetric
+  positive definite whenever the boundary set contains a pressure
+  Dirichlet/outflow side; otherwise `InvalidBoundarySet` is reported and the
+  Jacobi or multigrid projections should be used, as their iteration does
+  not require definiteness). `PressureJacobi` preconditions with the pressure
+  diagonal and `PressureMultigrid` with one V-cycle per application
+  (multigrid as a preconditioner for CG). The convergence test uses the
+  Euclidean residual norm; the report's `pressure_residual` is the same
+  A-form max-norm the other projections report. Parallel coarse-grid
+  correction: restriction and prolongation are `parfor` kernels whose
+  iterations write distinct cells and read only the other level's values.
 - `mac_apply_velocity_boundaries_2d` supports explicit `Dirichlet`, `Neumann`,
   `Periodic`, `Wall`, `Inflow` and `Outflow` kinds. The descriptor separates
   normal/tangential velocity data from pressure value/gradient data.
@@ -37,13 +67,18 @@ manufactured pressure-recovery projection, projection of a non-trivial
 periodic velocity field and a lid-driven cavity step. A further manufactured one-dimensional
 Dirichlet-pressure test checks recovery against a known pressure field, while
 the non-trivial periodic test checks divergence reduction from an initially
-non-zero velocity field. The example
-[`examples/lid_driven_cavity.fsht`](examples/lid_driven_cavity.fsht) advances a
-32×32, Reynolds-number-100 transient cavity for 500 explicit steps and prints
-divergence checkpoints plus the two centreline velocity profiles. It is a
-repeatable demonstration/benchmark input, not yet a verified Ghia steady-state
-benchmark: no external reference curve or quantitative Ghia acceptance
-tolerance is bundled.
+non-zero velocity field. The multigrid tests add the transfer-adjoint
+identity, Dirichlet/periodic manufactured-pressure recovery through the
+multigrid projection, a wall-bounded divergence-reduction case, and a
+same-problem comparison in which the multigrid-preconditioned CG needs fewer
+iterations than the Jacobi-preconditioned CG. The examples
+[`examples/lid_driven_cavity.fsht`](examples/lid_driven_cavity.fsht) and
+[`examples/multigrid_projection.fsht`](examples/multigrid_projection.fsht)
+advance a 32×32, Reynolds-number-100 transient cavity for 500 explicit steps
+and project a wall-bounded flow with the multigrid solver, respectively. The
+cavity run is a repeatable demonstration/benchmark input, not yet a verified
+Ghia steady-state benchmark: no external reference curve or quantitative Ghia
+acceptance tolerance is bundled.
 
 ## Transport and time integration
 
@@ -71,10 +106,14 @@ conventions, not an all-purpose boundary-condition library; validate them for
 the governing equations and geometry in use.
 
 The projection and momentum predictor are 2D, constant-density and uniform
-Cartesian. 3D MAC face counts and divergence are available, but 3D pressure
-projection/time integration is not. Turbulence, compressible flow, heat and
-species transport, variable-density flow, non-orthogonal grids, adaptive mesh
-refinement and GPU execution are not implemented.
+Cartesian. The multigrid hierarchy coarsens by exactly 2:1 in both
+dimensions, so every level keeps at least three cells per dimension: grids
+whose dimensions are not both even stop at a single level (plain smoothing),
+and level/sweep/relaxation parameters are validated (`InvalidGrid`/
+`InvalidRelaxation`). 3D MAC face counts and divergence are available, but 3D
+pressure projection/time integration is not. Turbulence, compressible flow,
+heat and species transport, variable-density flow, non-orthogonal grids,
+adaptive mesh refinement and GPU execution are not implemented.
 
 ## Build and test
 

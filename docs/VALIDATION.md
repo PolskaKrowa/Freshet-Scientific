@@ -1,9 +1,60 @@
-# Validation record — Freshet-Scientific 0.2.1
+# Validation record — Freshet-Scientific 0.3.0
 
 This file distinguishes checks actually performed in the packaging
 environment from tests that remain the responsibility of a user's Penstock
 installation. A source-level or independent reference check is not presented
 as a Penstock compiler pass.
+
+## Independent reference validation performed for 0.3.0 (package environment)
+
+Every 0.3.0 algorithm was implemented and exercised first as an independent
+Python reference of the identical formulation, and the shipped Freshet code
+plus its test constants were written against the reference's measurements:
+
+- **Multigrid:** dense-matrix two-grid analysis of the cell-centred pair
+  (piecewise-constant prolongation P, block-average restriction R = Pᵀ/4)
+  verified the rediscretisation identity R·A·P = 2·A₂h exactly (including
+  Dirichlet/Neumann closure rows and periodic wrap), the adjoint identity
+  ⟨P e, r⟩ = 4 ⟨e, R r⟩ to machine precision on wrapped and clamped grids, and
+  a two-grid spectral radius of ≈0.16 with the natural rediscretised coarse
+  operator (rediscretisation without the constant pair diverges, radius ≈2.5 —
+  the reason the shipped pair is what it is). V-cycle convergence measured on
+  the shipped test problems: 6×6 Dirichlet manufactured pressure converges in
+  15 cycles to 1e-10 (max error 3.5e-13), 8×8 periodic manufactured in 11
+  cycles (1.6e-13), 16×16 periodic (three levels) in 14 cycles, and an 8×8
+  wall/lid case in 12 cycles to 1e-8. The weighted-Jacobi baseline for the
+  same Dirichlet problem needs 428 sweeps.
+- **Pressure PCG:** on the 8×8 one-dimensional manufactured Dirichlet
+  problem, Jacobi-PCG converges in 16 iterations and multigrid-PCG in 9
+  (both to 1e-10, pressure error ≤ 2.8e-14) — the shipped comparison test's
+  margins. The operator's sign convention (A is the negative Laplacian, CG
+  runs on L = -A) was verified by eigen-decomposition of the constrained
+  systems.
+- **GMRES:** the restarted reference (modified Gram-Schmidt + Givens, right
+  preconditioning) reproduces the 2×2 nonsymmetric solution (0.1, 0.6),
+  converges in 22 inner steps with Jacobi and identity preconditioning on an
+  8×8 nonsymmetric system, and in 28 outer steps with restart = 1 — matching
+  the shipped tolerances. Lucky-breakdown and sign-cancellation behaviour
+  was checked against direct dense solves.
+- **Sparse global analysis:** the determinate three-bar triangle (pin,
+  roller, 1000 N apex load) matches statics exactly (inclined compression
+  1118.033989 N, base tension 1000 N, reactions (0, 500) N) and the
+  Castigliano apex settlement to 1e-18 relative; the 3D three-bar support
+  matches compression 2√3·P/9 and the unit-load settlement to 1e-15. The
+  mechanism-deficient two-bar variant (m+r < 2j) that motivated the
+  three-bar design was identified by eigen-analysis in the reference.
+- **FDO format:** a byte-level reference implementation of the layout
+  (32-byte header with magic/version/byte-order/Adler-32, 80-byte directory
+  entries, raw and run-length payloads) round-trips both byte orders, sizes
+  the shipped test file at exactly 448 bytes, compresses the run column to
+  16 bytes, exercises the raw fallback, and detects single-byte payload
+  corruption through the checksum. Adler-32 was checked against published
+  vectors (`"a" → 6422626`, `"abc" → 38600999`).
+
+The static checks of the package environment were re-run over all changed
+sources (see below). No Penstock compilation pass is claimed for 0.3.0 in
+this environment; the commands for revalidation with the reference
+toolchain are at the end of this file.
 
 ## Compiler validation performed for 0.2.1
 
@@ -52,20 +103,27 @@ changes to Freshet-lang or Penstock from this repository:
 - `borrowed mut` aggregate parameters do not write back; handle closes are
   exactly-once by construction.
 
-## Checks performed in the package environment (retained from 0.2.0)
+## Checks performed in the package environment (retained and extended for 0.3.0)
 
 - Static scan of all `.fsht` files: balanced delimiters, module declarations,
   no `match`/`if` used as expressions, mutable bindings for writable
-  aliases derived from `Span<T>.ptr`.
+  aliases derived from `Span<T>.ptr`, statement-form enum-variant matching,
+  no bitwise/shift operators, no `fn main()` generic instantiation, and no
+  floating-point `reduction(min:/max:)` clauses. New 0.3.0 sources were
+  additionally restricted to constructs demonstrated by the 0.2.1-validated
+  corpus (span slicing, pointer-to-pointer casts, `str_to_cstr`, `defer`,
+  `malloc`/`free`, checked arithmetic).
 - `sh -n tools/test-all.sh`.
 - Parsed all four `penstock.toml` files with a TOML parser and checked that
-  each declares a static-library target and source entry.
+  each declares a static-library target and source entry (Freshet-Data now
+  lists two compilation roots: `freshet_data.fsht` and `fdo_format.fsht`).
 - Independent reference calculations for the scaled 2-norm at large and
   small magnitudes, Welford/Chan merge agreement, a small SPD PCG system,
   the periodic MAC `D(G(p))` identity, a manufactured Dirichlet pressure
   recovery, closed-wall scalar mass conservation, and the eigenvalue
   analysis that pinned the projection's undamped odd-even mode (maximal
-  non-gauge eigenvalue 1.0 of the unrelaxed iteration matrix).
+  non-gauge eigenvalue 1.0 of the unrelaxed iteration matrix), plus the
+  0.3.0 reference set listed above.
 
 ## Not performed here
 
@@ -83,8 +141,13 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
+The 0.3.0 additions must be revalidated with the same commands: the expected
+suite counts after revalidation are Numerics 22/22, Fluid 20/20, Data 24/24
+and Mechanics 19/19, plus the four new examples (`gmres_solver`,
+`multigrid_projection`, `global_truss`, `fdo_roundtrip`).
+
 The lid-driven cavity example is a 32×32, Re=100 transient run that emits
 centreline profiles. It is not yet quantitatively verified against a
 published Ghia steady-state reference curve. The Mechanics FEM
-implementation is a 1D axial-bar foundation, not a general 2D/3D
-finite-element solver.
+implementation keeps a 1D axial-bar dense foundation; the sparse global path
+is a linear truss foundation, not a general 2D/3D finite-element solver.

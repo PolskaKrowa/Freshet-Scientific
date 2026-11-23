@@ -11,11 +11,13 @@ pub enum FluidError {
     InvalidTolerance,
     InvalidBoundarySet,
     IncompatibleBoundaryFlux,
+    InvalidRelaxation,
     DimensionMismatch,
     SizeOverflow,
     NonFiniteInput,
     NonFiniteResult,
-    PressureNotConverged
+    PressureNotConverged,
+    PressureCgBreakdown
 }
 
 pub enum BoundaryKind { Dirichlet, Neumann, Periodic, Wall, Inflow, Outflow }
@@ -931,4 +933,850 @@ pub fn cavity_step_2d(
     parfor (i in 0..u.len) { u_ptr[i] = u_star.ptr[i]; }
     parfor (i in 0..v.len) { v_ptr[i] = v_star.ptr[i]; }
     return Ok(report);
+}
+
+// ---------------------------------------------------------------------------
+// 0.3.0 additions: the MAC pressure operator as a reusable kernel, geometric
+// multigrid (cell-centred 2:1 coarsening), and preconditioned-conjugate-
+// gradient pressure projections. The multigrid transfer pair is deliberately
+// simple and boundary-blind: the piecewise-constant prolongation P (each fine
+// cell takes its parent coarse value) and the block-average restriction
+// R = P^T/4, for which the rediscretised 2h operator satisfies R*A*P = 2*A_2h
+// exactly on interior and boundary rows alike; with the natural rediscretised
+// coarse operator this is an over-corrected Galerkin pair (measured two-grid
+// contraction ~0.16 on the shipped tests; see docs/VALIDATION.md). Because
+// both transfer kernels index only existing cells, no boundary-specific
+// clamping or wrapping is required at any level.
+// ---------------------------------------------------------------------------
+
+// The MAC pressure operator with full boundary data: out = A*p where A is
+// the D*G closure used by project_incompressible_mac_2d (A is the negative
+// discrete Laplacian: neighbour_sum - diagonal*p + source). This kernel is
+// the shared building block of the residual reports, the multigrid sweeps
+// and the conjugate-gradient projections.
+pub fn mac_pressure_operator_apply_2d(
+    nx: u64, ny: u64, dx: f64, dy: f64, boundaries: MACBoundaryConditions2D,
+    pressure: Span<f64>, output: Span<f64>
+) -> Result<u64, FluidError> {
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    validate_boundaries(boundaries)?;
+    let cells: u64 = grid_cell_count_2d(nx, ny)?;
+    if (pressure.len != cells || output.len != cells) { return Err(DimensionMismatch); }
+    validate_finite(pressure)?;
+    let inv_dx: f64 = 1.0 / dx; let inv_dy: f64 = 1.0 / dy;
+    if (!finite_f64(inv_dx) || !finite_f64(inv_dy)) { return Err(NonFiniteResult); }
+    let inv_dx2: f64 = inv_dx * inv_dx; let inv_dy2: f64 = inv_dy * inv_dy;
+    if (!finite_f64(inv_dx2) || !finite_f64(inv_dy2)) { return Err(NonFiniteResult); }
+    let mut out_ptr: *f64 = output.ptr;
+    let pressure_ptr: *f64 = pressure.ptr;
+    parfor (row in 0..ny) {
+        for (col in 0..nx) {
+            let cell: u64 = row * nx + col;
+            let mut neighbour_sum: f64 = 0.0;
+            let mut diagonal: f64 = 0.0;
+            let mut source: f64 = 0.0;
+            if (col > 0) { neighbour_sum = neighbour_sum + pressure_ptr[cell - 1] * inv_dx2; diagonal = diagonal + inv_dx2; }
+            else {
+                neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.left, pressure_ptr[row * nx + nx - 1], inv_dx2);
+                diagonal = diagonal + pressure_face_diagonal(boundaries.left, inv_dx2);
+                source = source + pressure_face_source(boundaries.left, dx);
+            }
+            if (col + 1 < nx) { neighbour_sum = neighbour_sum + pressure_ptr[cell + 1] * inv_dx2; diagonal = diagonal + inv_dx2; }
+            else {
+                neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.right, pressure_ptr[row * nx], inv_dx2);
+                diagonal = diagonal + pressure_face_diagonal(boundaries.right, inv_dx2);
+                source = source + pressure_face_source(boundaries.right, dx);
+            }
+            if (row > 0) { neighbour_sum = neighbour_sum + pressure_ptr[cell - nx] * inv_dy2; diagonal = diagonal + inv_dy2; }
+            else {
+                neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.bottom, pressure_ptr[(ny - 1) * nx + col], inv_dy2);
+                diagonal = diagonal + pressure_face_diagonal(boundaries.bottom, inv_dy2);
+                source = source + pressure_face_source(boundaries.bottom, dy);
+            }
+            if (row + 1 < ny) { neighbour_sum = neighbour_sum + pressure_ptr[cell + nx] * inv_dy2; diagonal = diagonal + inv_dy2; }
+            else {
+                neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.top, pressure_ptr[col], inv_dy2);
+                diagonal = diagonal + pressure_face_diagonal(boundaries.top, inv_dy2);
+                source = source + pressure_face_source(boundaries.top, dy);
+            }
+            out_ptr[cell] = neighbour_sum - diagonal * pressure_ptr[cell] + source;
+        }
+    }
+    validate_finite_result(output)?;
+    return Ok(cells);
+}
+
+// The diagonal of the MAC pressure operator (data-independent: it depends
+// only on the boundary kinds and spacings). This is the Jacobi smoothing
+// weight and the Jacobi preconditioner for the PCG projection.
+pub fn mac_pressure_diagonal_2d(
+    nx: u64, ny: u64, dx: f64, dy: f64, boundaries: MACBoundaryConditions2D,
+    diagonal: Span<f64>
+) -> Result<u64, FluidError> {
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    validate_boundaries(boundaries)?;
+    let cells: u64 = grid_cell_count_2d(nx, ny)?;
+    if (diagonal.len != cells) { return Err(DimensionMismatch); }
+    let inv_dx: f64 = 1.0 / dx; let inv_dy: f64 = 1.0 / dy;
+    if (!finite_f64(inv_dx) || !finite_f64(inv_dy)) { return Err(NonFiniteResult); }
+    let inv_dx2: f64 = inv_dx * inv_dx; let inv_dy2: f64 = inv_dy * inv_dy;
+    if (!finite_f64(inv_dx2) || !finite_f64(inv_dy2)) { return Err(NonFiniteResult); }
+    let mut diagonal_ptr: *f64 = diagonal.ptr;
+    parfor (row in 0..ny) {
+        for (col in 0..nx) {
+            let cell: u64 = row * nx + col;
+            let mut value: f64 = 0.0;
+            value = value + inv_dx2; value = value + inv_dx2;
+            value = value + inv_dy2; value = value + inv_dy2;
+            if (col == 0) {
+                value = value - inv_dx2;
+                value = value + pressure_face_diagonal(boundaries.left, inv_dx2);
+            }
+            if (col + 1 == nx) {
+                value = value - inv_dx2;
+                value = value + pressure_face_diagonal(boundaries.right, inv_dx2);
+            }
+            if (row == 0) {
+                value = value - inv_dy2;
+                value = value + pressure_face_diagonal(boundaries.bottom, inv_dy2);
+            }
+            if (row + 1 == ny) {
+                value = value - inv_dy2;
+                value = value + pressure_face_diagonal(boundaries.top, inv_dy2);
+            }
+            diagonal_ptr[cell] = value;
+        }
+    }
+    validate_finite_result(diagonal)?;
+    return Ok(cells);
+}
+
+// Same-kind zero-data boundary set: the error equation of the pressure
+// system has homogeneous Dirichlet/Neumann data, so every multigrid level
+// reuses the fine-level boundary KINDS with zero values. An ordinary
+// function (not @pure) because it constructs a struct literal.
+fn homogeneous_boundary_set_2d(boundaries: MACBoundaryConditions2D) -> MACBoundaryConditions2D {
+    let left: BoundaryCondition2D = BoundaryCondition2D { kind: boundaries.left.kind, normal_velocity: 0.0, tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0 };
+    let right: BoundaryCondition2D = BoundaryCondition2D { kind: boundaries.right.kind, normal_velocity: 0.0, tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0 };
+    let bottom: BoundaryCondition2D = BoundaryCondition2D { kind: boundaries.bottom.kind, normal_velocity: 0.0, tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0 };
+    let top: BoundaryCondition2D = BoundaryCondition2D { kind: boundaries.top.kind, normal_velocity: 0.0, tangential_velocity: 0.0, pressure_value: 0.0, pressure_gradient: 0.0 };
+    return MACBoundaryConditions2D { left: left, right: right, bottom: bottom, top: top };
+}
+
+// Weighted-Jacobi sweeps toward A*state = rhs with the supplied boundary
+// data (the multigrid levels pass the homogeneous set). scratch must not
+// alias state or rhs; it holds the sweep target before it is copied back,
+// exactly like the Jacobi sweep of project_incompressible_mac_2d.
+fn pressure_jacobi_sweep_2d(
+    nx: u64, ny: u64, dx: f64, dy: f64, boundaries: MACBoundaryConditions2D,
+    rhs: Span<f64>, state: Span<f64>, scratch: Span<f64>, sweeps: u64, omega: f64
+) -> Result<u64, FluidError> {
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    validate_boundaries(boundaries)?;
+    if (!finite_f64(omega) || omega <= 0.0 || omega >= 2.0) { return Err(InvalidRelaxation); }
+    if (sweeps == 0) { return Err(InvalidRelaxation); }
+    let cells: u64 = grid_cell_count_2d(nx, ny)?;
+    if (rhs.len != cells || state.len != cells || scratch.len != cells) { return Err(DimensionMismatch); }
+    validate_finite(rhs)?;
+    validate_finite(state)?;
+    let inv_dx: f64 = 1.0 / dx; let inv_dy: f64 = 1.0 / dy;
+    if (!finite_f64(inv_dx) || !finite_f64(inv_dy)) { return Err(NonFiniteResult); }
+    let inv_dx2: f64 = inv_dx * inv_dx; let inv_dy2: f64 = inv_dy * inv_dy;
+    if (!finite_f64(inv_dx2) || !finite_f64(inv_dy2)) { return Err(NonFiniteResult); }
+    let mut state_ptr: *f64 = state.ptr;
+    let mut scratch_ptr: *f64 = scratch.ptr;
+    let rhs_ptr: *f64 = rhs.ptr;
+    for (sweep in 0..sweeps) {
+        parfor (row in 0..ny) {
+            for (col in 0..nx) {
+                let cell: u64 = row * nx + col;
+                let mut neighbour_sum: f64 = 0.0;
+                let mut diagonal: f64 = 0.0;
+                let mut source: f64 = 0.0;
+                if (col > 0) { neighbour_sum = neighbour_sum + state_ptr[cell - 1] * inv_dx2; diagonal = diagonal + inv_dx2; }
+                else {
+                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.left, state_ptr[row * nx + nx - 1], inv_dx2);
+                    diagonal = diagonal + pressure_face_diagonal(boundaries.left, inv_dx2);
+                    source = source + pressure_face_source(boundaries.left, dx);
+                }
+                if (col + 1 < nx) { neighbour_sum = neighbour_sum + state_ptr[cell + 1] * inv_dx2; diagonal = diagonal + inv_dx2; }
+                else {
+                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.right, state_ptr[row * nx], inv_dx2);
+                    diagonal = diagonal + pressure_face_diagonal(boundaries.right, inv_dx2);
+                    source = source + pressure_face_source(boundaries.right, dx);
+                }
+                if (row > 0) { neighbour_sum = neighbour_sum + state_ptr[cell - nx] * inv_dy2; diagonal = diagonal + inv_dy2; }
+                else {
+                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.bottom, state_ptr[(ny - 1) * nx + col], inv_dy2);
+                    diagonal = diagonal + pressure_face_diagonal(boundaries.bottom, inv_dy2);
+                    source = source + pressure_face_source(boundaries.bottom, dy);
+                }
+                if (row + 1 < ny) { neighbour_sum = neighbour_sum + state_ptr[cell + nx] * inv_dy2; diagonal = diagonal + inv_dy2; }
+                else {
+                    neighbour_sum = neighbour_sum + pressure_face_neighbour_sum(boundaries.top, state_ptr[col], inv_dy2);
+                    diagonal = diagonal + pressure_face_diagonal(boundaries.top, inv_dy2);
+                    source = source + pressure_face_source(boundaries.top, dy);
+                }
+                let target: f64 = (neighbour_sum + source - rhs_ptr[cell]) / diagonal;
+                scratch_ptr[cell] = omega * target + (1.0 - omega) * state_ptr[cell];
+            }
+        }
+        validate_finite_result(scratch)?;
+        parfor (i in 0..cells) { state_ptr[i] = scratch_ptr[i]; }
+        validate_finite_result(state)?;
+    }
+    return Ok(cells * sweeps);
+}
+
+// Block-average restriction R: coarse (I,J) = 0.25 * (f(2I,2J) + f(2I+1,2J)
+// + f(2I,2J+1) + f(2I+1,2J+1)). R is the adjoint of the piecewise-constant
+// prolongation P below scaled by the 1/4 volume-average normalisation,
+// <P e, r> = 4 <e, R r>. Parallel coarse-grid correction: each parfor
+// iteration writes one distinct coarse cell and reads only fine values.
+pub fn mac_restrict_full_weighting_2d(
+    nx_fine: u64, ny_fine: u64, fine: Span<f64>, coarse: Span<f64>
+) -> Result<u64, FluidError> {
+    if (nx_fine < 2 || ny_fine < 2 || nx_fine % 2 != 0 || ny_fine % 2 != 0) { return Err(InvalidGrid); }
+    let coarse_columns: u64 = nx_fine / 2;
+    let coarse_rows: u64 = ny_fine / 2;
+    let coarse_cells: u64 = checked_fluid_size(checked_mul(coarse_columns, coarse_rows))?;
+    let fine_cells: u64 = checked_fluid_size(checked_mul(nx_fine, ny_fine))?;
+    if (fine.len != fine_cells || coarse.len != coarse_cells) { return Err(DimensionMismatch); }
+    validate_finite(fine)?;
+    let mut coarse_ptr: *f64 = coarse.ptr;
+    parfor (coarse_row in 0..coarse_rows) {
+        for (coarse_col in 0..coarse_columns) {
+            let coarse_cell: u64 = coarse_row * coarse_columns + coarse_col;
+            let row_low: u64 = 2 * coarse_row * nx_fine;
+            let row_high: u64 = (2 * coarse_row + 1) * nx_fine;
+            let col_low: u64 = 2 * coarse_col;
+            let col_high: u64 = 2 * coarse_col + 1;
+            coarse_ptr[coarse_cell] = 0.25 * (fine.ptr[row_low + col_low] + fine.ptr[row_low + col_high] +
+                                             fine.ptr[row_high + col_low] + fine.ptr[row_high + col_high]);
+        }
+    }
+    validate_finite_result(coarse)?;
+    return Ok(coarse_cells);
+}
+
+// Piecewise-constant (volume-injection) prolongation P: each fine cell takes
+// its parent coarse value. The parallel coarse-grid correction applies the
+// coarse error with accumulate = true (fine += P coarse); each parfor
+// iteration writes four distinct fine cells and reads only coarse values.
+// No division: parent indices are derived from the coarse loop counters.
+pub fn mac_prolongate_constant_2d(
+    nx_fine: u64, ny_fine: u64, coarse: Span<f64>, fine: Span<f64>, accumulate: bool
+) -> Result<u64, FluidError> {
+    if (nx_fine < 2 || ny_fine < 2 || nx_fine % 2 != 0 || ny_fine % 2 != 0) { return Err(InvalidGrid); }
+    let coarse_columns: u64 = nx_fine / 2;
+    let coarse_rows: u64 = ny_fine / 2;
+    let coarse_cells: u64 = checked_fluid_size(checked_mul(coarse_columns, coarse_rows))?;
+    let fine_cells: u64 = checked_fluid_size(checked_mul(nx_fine, ny_fine))?;
+    if (fine.len != fine_cells || coarse.len != coarse_cells) { return Err(DimensionMismatch); }
+    validate_finite(coarse)?;
+    if (accumulate) { validate_finite(fine)?; }
+    let mut fine_ptr: *f64 = fine.ptr;
+    parfor (coarse_row in 0..coarse_rows) {
+        for (coarse_col in 0..coarse_columns) {
+            let value: f64 = coarse.ptr[coarse_row * coarse_columns + coarse_col];
+            let row_low: u64 = 2 * coarse_row * nx_fine;
+            let row_high: u64 = (2 * coarse_row + 1) * nx_fine;
+            let col_low: u64 = 2 * coarse_col;
+            let col_high: u64 = 2 * coarse_col + 1;
+            if (accumulate) {
+                fine_ptr[row_low + col_low] = fine_ptr[row_low + col_low] + value;
+                fine_ptr[row_low + col_high] = fine_ptr[row_low + col_high] + value;
+                fine_ptr[row_high + col_low] = fine_ptr[row_high + col_low] + value;
+                fine_ptr[row_high + col_high] = fine_ptr[row_high + col_high] + value;
+            } else {
+                fine_ptr[row_low + col_low] = value;
+                fine_ptr[row_low + col_high] = value;
+                fine_ptr[row_high + col_low] = value;
+                fine_ptr[row_high + col_high] = value;
+            }
+        }
+    }
+    validate_finite_result(fine)?;
+    return Ok(fine_cells);
+}
+
+// Number of levels of the 2:1 cell-centred hierarchy: level 0 is the given
+// grid; coarsening continues while both dimensions are even and at least six
+// cells wide (halving keeps every level >= 3 cells). Odd grids simply keep
+// level 1, i.e. plain smoothing.
+pub fn mac_multigrid_level_count_2d(nx: u64, ny: u64) -> Result<u64, FluidError> {
+    if (nx < 3 || ny < 3) { return Err(InvalidGrid); }
+    let mut levels: u64 = 1;
+    let mut cx: u64 = nx;
+    let mut cy: u64 = ny;
+    while (cx >= 6 && cy >= 6 && cx % 2 == 0 && cy % 2 == 0) {
+        cx = cx / 2;
+        cy = cy / 2;
+        levels = levels + 1;
+    }
+    return Ok(levels);
+}
+
+// Workspace requirement (f64 words) of mac_pressure_v_cycle_2d for the full
+// hierarchy of the given grid: the finest-level defect plus, for every
+// coarser level, a right-hand-side, error and defect array:
+//   n_0 + 3 * (n_1 + ... + n_{levels-1}).
+// The finest-level rhs, error and solution spans are caller-provided and are
+// deliberately not part of this requirement.
+pub fn mac_multigrid_workspace_requirement_2d(nx: u64, ny: u64) -> Result<u64, FluidError> {
+    if (nx < 3 || ny < 3) { return Err(InvalidGrid); }
+    let mut total: u64 = checked_fluid_size(checked_mul(nx, ny))?;
+    let mut cx: u64 = nx;
+    let mut cy: u64 = ny;
+    while (cx >= 6 && cy >= 6 && cx % 2 == 0 && cy % 2 == 0) {
+        cx = cx / 2;
+        cy = cy / 2;
+        let level_cells: u64 = checked_fluid_size(checked_mul(cx, cy))?;
+        let triple: u64 = checked_fluid_size(checked_mul(3, level_cells))?;
+        total = checked_fluid_size(checked_add(total, triple))?;
+    }
+    return Ok(total);
+}
+
+// One geometric multigrid V-cycle on the homogeneous error equation
+// A_l e_l = rhs_l: pre-smooth, defect, restrict, (recursively) coarsen,
+// prolongate the coarse correction and post-smooth. The cycle is implemented
+// as an explicit descent/ascent level walk rather than recursion. The
+// coarsest level is smoothed with `coarse_sweeps` weighted-Jacobi sweeps
+// (an approximate solve; the shipped tests measure the composite
+// contraction rather than assuming an exact one). `error` is input and
+// output: callers using the cycle as a preconditioner zero it first, and
+// the standalone solver accumulates p += V(r) with a zeroed correction
+// buffer per cycle. work layout is exactly
+// mac_multigrid_workspace_requirement_2d for the requested level count.
+pub fn mac_pressure_v_cycle_2d(
+    nx: u64, ny: u64, dx: f64, dy: f64, boundaries: MACBoundaryConditions2D,
+    rhs: Span<f64>, error: Span<f64>, work: Span<f64>,
+    levels: u64, pre_smooth: u64, post_smooth: u64, coarse_sweeps: u64, omega: f64
+) -> Result<u64, FluidError> {
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    validate_boundaries(boundaries)?;
+    if (!finite_f64(omega) || omega <= 0.0 || omega >= 2.0) { return Err(InvalidRelaxation); }
+    if (pre_smooth == 0 || post_smooth == 0 || coarse_sweeps == 0) { return Err(InvalidRelaxation); }
+    let cells: u64 = grid_cell_count_2d(nx, ny)?;
+    if (rhs.len != cells || error.len != cells) { return Err(DimensionMismatch); }
+    if (levels == 0) { return Err(InvalidGrid); }
+    let max_levels: u64 = mac_multigrid_level_count_2d(nx, ny)?;
+    if (levels > max_levels) { return Err(InvalidGrid); }
+    // workspace requirement for the requested levels
+    let mut required: u64 = cells;
+    let mut cx: u64 = nx;
+    let mut cy: u64 = ny;
+    let mut remaining: u64 = levels;
+    while (remaining > 1 && cx >= 6 && cy >= 6 && cx % 2 == 0 && cy % 2 == 0) {
+        cx = cx / 2;
+        cy = cy / 2;
+        let level_cells: u64 = checked_fluid_size(checked_mul(cx, cy))?;
+        let triple: u64 = checked_fluid_size(checked_mul(3, level_cells))?;
+        required = checked_fluid_size(checked_add(required, triple))?;
+        remaining = remaining - 1;
+    }
+    if (work.len < required) { return Err(DimensionMismatch); }
+    validate_finite(rhs)?;
+    validate_finite(error)?;
+    let homogenized: MACBoundaryConditions2D = homogeneous_boundary_set_2d(boundaries);
+    // Descent: level 0 uses the caller's rhs/error and the work prefix as
+    // its defect; every deeper level's [rhs | error | defect] block follows.
+    let mut level_nx: u64 = nx;
+    let mut level_ny: u64 = ny;
+    let mut level_hx: f64 = dx;
+    let mut level_hy: f64 = dy;
+    let mut level_cells: u64 = cells;
+    let mut level_offset: u64 = cells;
+    let mut level: u64 = 0;
+    let mut current_rhs: Span<f64> = rhs;
+    let mut current_error: Span<f64> = error;
+    let mut current_defect: Span<f64> = work[0..cells];
+    while (level + 1 < levels) {
+        pressure_jacobi_sweep_2d(level_nx, level_ny, level_hx, level_hy, homogenized,
+                                  current_rhs, current_error, current_defect, pre_smooth, omega)?;
+        mac_pressure_operator_apply_2d(level_nx, level_ny, level_hx, level_hy, homogenized,
+                                       current_error, current_defect)?;
+        let mut defect_ptr: *f64 = current_defect.ptr;
+        let rhs_ptr: *f64 = current_rhs.ptr;
+        parfor (i in 0..level_cells) { defect_ptr[i] = rhs_ptr[i] - defect_ptr[i]; }
+        validate_finite_result(current_defect)?;
+        let fine_nx: u64 = level_nx;
+        let fine_ny: u64 = level_ny;
+        let next_nx: u64 = level_nx / 2;
+        let next_ny: u64 = level_ny / 2;
+        let next_cells: u64 = checked_fluid_size(checked_mul(next_nx, next_ny))?;
+        let next_triple: u64 = checked_fluid_size(checked_mul(3, next_cells))?;
+        let next_rhs: Span<f64> = work[level_offset..(level_offset + next_cells)];
+        let next_error: Span<f64> = work[(level_offset + next_cells)..(level_offset + next_cells + next_cells)];
+        let next_defect: Span<f64> = work[(level_offset + next_cells + next_cells)..(level_offset + next_triple)];
+        mac_restrict_full_weighting_2d(fine_nx, fine_ny, current_defect, next_rhs)?;
+        let mut next_error_ptr: *f64 = next_error.ptr;
+        parfor (i in 0..next_cells) { next_error_ptr[i] = 0.0; }
+        current_rhs = next_rhs;
+        current_error = next_error;
+        current_defect = next_defect;
+        level_nx = next_nx;
+        level_ny = next_ny;
+        level_cells = next_cells;
+        level_offset = checked_fluid_size(checked_add(level_offset, next_triple))?;
+        level_hx = level_hx * 2.0;
+        level_hy = level_hy * 2.0;
+        if (!finite_f64(level_hx) || !finite_f64(level_hy)) { return Err(NonFiniteResult); }
+        level = level + 1;
+    }
+    // coarsest level: approximate solve by heavier smoothing
+    pressure_jacobi_sweep_2d(level_nx, level_ny, level_hx, level_hy, homogenized,
+                              current_rhs, current_error, current_defect, coarse_sweeps, omega)?;
+    // Ascent: prolongate each coarse error into its parent and post-smooth.
+    // Parent sizes are recovered by exact doubling, and the block offsets by
+    // subtracting the parent triple, so no per-level metadata is stored.
+    let mut ascend_nx: u64 = level_nx;
+    let mut ascend_ny: u64 = level_ny;
+    let mut ascend_cells: u64 = level_cells;
+    let mut ascend_offset: u64 = cells;
+    if (levels > 1) { ascend_offset = level_offset - level_cells - level_cells - level_cells; }
+    let mut ascend_hx: f64 = level_hx;
+    let mut ascend_hy: f64 = level_hy;
+    while (ascend_nx < nx) {
+        let parent_nx: u64 = 2 * ascend_nx;
+        let parent_ny: u64 = 2 * ascend_ny;
+        let parent_cells: u64 = checked_fluid_size(checked_mul(parent_nx, parent_ny))?;
+        let parent_hx: f64 = ascend_hx * 0.5;
+        let parent_hy: f64 = ascend_hy * 0.5;
+        let coarse_error: Span<f64> = work[(ascend_offset + ascend_cells)..(ascend_offset + ascend_cells + ascend_cells)];
+        let mut parent_offset: u64 = cells;
+        if (parent_nx == nx) {
+            // returning to level 0: the caller's error/rhs and the level-0
+            // defect slot provide the finest buffers.
+            mac_prolongate_constant_2d(parent_nx, parent_ny, coarse_error, error, true)?;
+            pressure_jacobi_sweep_2d(parent_nx, parent_ny, parent_hx, parent_hy, homogenized,
+                                     rhs, error, work[0..cells], post_smooth, omega)?;
+        } else {
+            parent_offset = ascend_offset - parent_cells - parent_cells - parent_cells;
+            let parent_rhs: Span<f64> = work[parent_offset..(parent_offset + parent_cells)];
+            let parent_error: Span<f64> = work[(parent_offset + parent_cells)..(parent_offset + parent_cells + parent_cells)];
+            let parent_defect: Span<f64> = work[(parent_offset + parent_cells + parent_cells)..(parent_offset + parent_cells + parent_cells + parent_cells)];
+            mac_prolongate_constant_2d(parent_nx, parent_ny, coarse_error, parent_error, true)?;
+            pressure_jacobi_sweep_2d(parent_nx, parent_ny, parent_hx, parent_hy, homogenized,
+                                     parent_rhs, parent_error, parent_defect, post_smooth, omega)?;
+        }
+        ascend_nx = parent_nx;
+        ascend_ny = parent_ny;
+        ascend_cells = parent_cells;
+        ascend_offset = parent_offset;
+        ascend_hx = parent_hx;
+        ascend_hy = parent_hy;
+    }
+    validate_finite_result(error)?;
+    return Ok(levels);
+}
+
+// Selects the preconditioner of project_incompressible_mac_pcg_2d. The
+// pressure operator is the negative discrete Laplacian; the conjugate
+// gradient therefore runs on L = -A (which is symmetric positive definite
+// whenever the boundary set contains a pressure Dirichlet/outflow side),
+// with rhs negated to match. Both preconditioners approximate L^{-1}.
+pub enum PressurePreconditioner { PressureJacobi, PressureMultigrid }
+
+fn dot_cells(a: Span<f64>, b: Span<f64>) -> Result<f64, FluidError> {
+    if (a.len != b.len) { return Err(DimensionMismatch); }
+    validate_finite(a)?;
+    validate_finite(b)?;
+    let mut sum: f64 = 0.0;
+    @reproducible parfor (i in 0..a.len) [reduction(+:sum)] {
+        sum = sum + a.ptr[i] * b.ptr[i];
+    }
+    if (!finite_f64(sum)) { return Err(NonFiniteResult); }
+    return Ok(sum);
+}
+
+// Scaled sum-of-squares norm (mirrors norm2_f64 of Freshet-Numerics; Fluid
+// deliberately does not import Freshet-Numerics).
+fn cells_norm2(values: Span<f64>) -> Result<f64, FluidError> {
+    let mut scale: f64 = 0.0;
+    let mut sum_squares: f64 = 1.0;
+    for (i in 0..values.len) {
+        let value: f64 = values.ptr[i];
+        if (!finite_f64(value)) { return Err(NonFiniteInput); }
+        let absolute: f64 = fabs(value);
+        if (absolute > 0.0) {
+            if (scale < absolute) {
+                let ratio: f64 = scale / absolute;
+                sum_squares = 1.0 + sum_squares * ratio * ratio;
+                scale = absolute;
+            } else {
+                let ratio: f64 = absolute / scale;
+                sum_squares = sum_squares + ratio * ratio;
+            }
+        }
+    }
+    if (scale == 0.0) { return Ok(0.0); }
+    let result: f64 = scale * sqrt(sum_squares);
+    if (!finite_f64(result)) { return Err(NonFiniteResult); }
+    return Ok(result);
+}
+
+fn negate_cells(values: Span<f64>) -> Result<u64, FluidError> {
+    validate_finite(values)?;
+    let mut ptr: *f64 = values.ptr;
+    parfor (i in 0..values.len) { ptr[i] = 0.0 - ptr[i]; }
+    return Ok(values.len);
+}
+
+// Inverse diagonal of the MAC pressure operator (positive diagonals are
+// guaranteed for pressure-referenced boundary sets; a non-positive diagonal
+// reports PressureCgBreakdown because the operator cannot be SPD).
+fn mac_pressure_inverse_diagonal_2d(
+    nx: u64, ny: u64, dx: f64, dy: f64, boundaries: MACBoundaryConditions2D,
+    inverse_diagonal: Span<f64>
+) -> Result<u64, FluidError> {
+    mac_pressure_diagonal_2d(nx, ny, dx, dy, boundaries, inverse_diagonal)?;
+    let mut ptr: *f64 = inverse_diagonal.ptr;
+    for (i in 0..inverse_diagonal.len) {
+        if (!finite_f64(ptr[i]) || ptr[i] <= 0.0) { return Err(PressureCgBreakdown); }
+        ptr[i] = 1.0 / ptr[i];
+        if (!finite_f64(ptr[i])) { return Err(PressureCgBreakdown); }
+    }
+    return Ok(inverse_diagonal.len);
+}
+
+// MAC projection with a geometric multigrid pressure solve. The velocity
+// correction, solvability check and reporting are those of
+// project_incompressible_mac_2d; only the pressure iteration differs:
+// each cycle computes the residual r = rhs - A p, applies one V-cycle
+// (mac_pressure_v_cycle_2d) on the homogeneous error equation with a zeroed
+// correction buffer, and accumulates p += correction. This projection accepts
+// the same boundary sets as the Jacobi projection (including pure Neumann,
+// Wall and periodic sets, whose compatibility is checked as usual).
+pub fn project_incompressible_mac_multigrid_2d(
+    nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, density: f64,
+    boundaries: MACBoundaryConditions2D,
+    u_faces: Span<f64>, v_faces: Span<f64>, pressure: Span<f64>, pressure_scratch: Span<f64>,
+    correction: Span<f64>, divergence: Span<f64>, work: Span<f64>,
+    max_iterations: u64, tolerance: f64,
+    levels: u64, pre_smooth: u64, post_smooth: u64, coarse_sweeps: u64, omega: f64
+) -> Result<ProjectionReport, FluidError> {
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (!finite_f64(dt) || dt <= 0.0) { return Err(InvalidTimestep); }
+    if (!finite_f64(density) || density <= 0.0) { return Err(InvalidDensity); }
+    if (!finite_f64(tolerance) || tolerance < 0.0) { return Err(InvalidTolerance); }
+    validate_boundaries(boundaries)?;
+    let cells: u64 = grid_cell_count_2d(nx, ny)?;
+    if (u_faces.len != mac_u_face_count_2d(nx, ny)? || v_faces.len != mac_v_face_count_2d(nx, ny)? ||
+        pressure.len != cells || pressure_scratch.len != cells || correction.len != cells ||
+        divergence.len != cells) { return Err(DimensionMismatch); }
+    let max_levels: u64 = mac_multigrid_level_count_2d(nx, ny)?;
+    if (levels == 0 || levels > max_levels) { return Err(InvalidGrid); }
+    if (pre_smooth == 0 || post_smooth == 0 || coarse_sweeps == 0) { return Err(InvalidRelaxation); }
+    if (!finite_f64(omega) || omega <= 0.0 || omega >= 2.0) { return Err(InvalidRelaxation); }
+    // workspace requirement for the requested level count
+    let mut required: u64 = cells;
+    let mut cx: u64 = nx;
+    let mut cy: u64 = ny;
+    let mut remaining: u64 = levels;
+    while (remaining > 1 && cx >= 6 && cy >= 6 && cx % 2 == 0 && cy % 2 == 0) {
+        cx = cx / 2;
+        cy = cy / 2;
+        let level_cells: u64 = checked_fluid_size(checked_mul(cx, cy))?;
+        let triple: u64 = checked_fluid_size(checked_mul(3, level_cells))?;
+        required = checked_fluid_size(checked_add(required, triple))?;
+        remaining = remaining - 1;
+    }
+    if (work.len < required) { return Err(DimensionMismatch); }
+    validate_finite(u_faces)?; validate_finite(v_faces)?;
+    mac_apply_velocity_boundaries_2d(nx, ny, boundaries, u_faces, v_faces)?;
+    mac_divergence_2d(nx, ny, dx, dy, u_faces, v_faces, divergence)?;
+    let initial_divergence: f64 = max_abs(divergence)?;
+    let inv_dx: f64 = 1.0 / dx; let inv_dy: f64 = 1.0 / dy;
+    if (!finite_f64(inv_dx) || !finite_f64(inv_dy)) { return Err(NonFiniteResult); }
+    let rhs_scale: f64 = density / dt;
+    let correction_scale: f64 = dt / density;
+    if (!finite_f64(rhs_scale) || !finite_f64(correction_scale)) { return Err(NonFiniteResult); }
+    let has_pressure_reference: bool = is_pressure_dirichlet(boundaries.left.kind) ||
+        is_pressure_dirichlet(boundaries.right.kind) || is_pressure_dirichlet(boundaries.bottom.kind) ||
+        is_pressure_dirichlet(boundaries.top.kind);
+    if (!has_pressure_reference) {
+        let mut net_rhs: f64 = 0.0;
+        @reproducible parfor (i in 0..cells) [reduction(+:net_rhs)] { net_rhs = net_rhs + divergence.ptr[i]; }
+        let mut boundary_source: f64 = 0.0;
+        if (is_neumann(boundaries.left.kind)) { boundary_source = boundary_source + boundaries.left.pressure_gradient * (ny as f64) / dx; }
+        if (is_neumann(boundaries.right.kind)) { boundary_source = boundary_source + boundaries.right.pressure_gradient * (ny as f64) / dx; }
+        if (is_neumann(boundaries.bottom.kind)) { boundary_source = boundary_source + boundaries.bottom.pressure_gradient * (nx as f64) / dy; }
+        if (is_neumann(boundaries.top.kind)) { boundary_source = boundary_source + boundaries.top.pressure_gradient * (nx as f64) / dy; }
+        let scaled_flux: f64 = rhs_scale * net_rhs;
+        if (!finite_f64(scaled_flux) || !finite_f64(boundary_source)) { return Err(NonFiniteResult); }
+        let mismatch: f64 = fabs(scaled_flux - boundary_source);
+        if (!finite_f64(mismatch)) { return Err(NonFiniteResult); }
+        if (mismatch > 1.0e-10 * (1.0 + fabs(scaled_flux) + fabs(boundary_source))) { return Err(IncompatibleBoundaryFlux); }
+    }
+    let mut pressure_ptr: *f64 = pressure.ptr;
+    let mut scratch_ptr: *f64 = pressure_scratch.ptr;
+    let mut correction_ptr: *f64 = correction.ptr;
+    for (i in 0..cells) { pressure_ptr[i] = 0.0; scratch_ptr[i] = 0.0; }
+    let mut iterations: u64 = 0;
+    let mut pressure_residual: f64 = 1.0e300;
+    let mut converged: bool = false;
+    for (cycle in 0..max_iterations) {
+        // residual r = rhs - A p into pressure_scratch
+        mac_pressure_operator_apply_2d(nx, ny, dx, dy, boundaries, pressure, pressure_scratch)?;
+        parfor (i in 0..cells) { scratch_ptr[i] = rhs_scale * divergence.ptr[i] - scratch_ptr[i]; }
+        validate_finite_result(pressure_scratch)?;
+        // one V-cycle on the homogeneous error equation from a zero correction
+        parfor (i in 0..cells) { correction_ptr[i] = 0.0; }
+        mac_pressure_v_cycle_2d(nx, ny, dx, dy, boundaries, pressure_scratch, correction, work,
+                                levels, pre_smooth, post_smooth, coarse_sweeps, omega)?;
+        parfor (i in 0..cells) { pressure_ptr[i] = pressure_ptr[i] + correction_ptr[i]; }
+        validate_finite_result(pressure)?;
+        // residual report: max |A p - rhs| (serial deterministic maximum)
+        mac_pressure_operator_apply_2d(nx, ny, dx, dy, boundaries, pressure, correction)?;
+        let mut residual_max: f64 = 0.0;
+        for (i in 0..cells) {
+            let error: f64 = fabs(correction_ptr[i] - rhs_scale * divergence.ptr[i]);
+            if (error > residual_max) { residual_max = error; }
+        }
+        if (!finite_f64(residual_max)) { return Err(NonFiniteResult); }
+        iterations = cycle + 1;
+        pressure_residual = residual_max;
+        if (pressure_residual <= tolerance) { converged = true; break; }
+    }
+
+    // Correct internal face velocities exactly as project_incompressible_mac_2d
+    // does; this block is deliberately duplicated (rather than shared through a
+    // helper) so the 0.2.1-validated Jacobi projection function remains
+    // byte-for-byte untouched.
+    let mut u_ptr: *f64 = u_faces.ptr; let mut v_ptr: *f64 = v_faces.ptr;
+    parfor (row in 0..ny) {
+        for (face in 1..nx) {
+            let left_cell: u64 = row * nx + face - 1;
+            let right_cell: u64 = row * nx + face;
+            let index: u64 = row * (nx + 1) + face;
+            u_ptr[index] = u_ptr[index] - correction_scale * (pressure_ptr[right_cell] - pressure_ptr[left_cell]) / dx;
+        }
+    }
+    parfor (face in 1..ny) {
+        for (col in 0..nx) {
+            let lower_cell: u64 = (face - 1) * nx + col;
+            let upper_cell: u64 = face * nx + col;
+            v_ptr[face * nx + col] = v_ptr[face * nx + col] - correction_scale * (pressure_ptr[upper_cell] - pressure_ptr[lower_cell]) / dy;
+        }
+    }
+    for (row in 0..ny) {
+        let low_cell: u64 = row * nx;
+        let high_cell: u64 = row * nx + nx - 1;
+        let low_grad: f64 = boundary_pressure_gradient(boundaries.left, pressure_ptr[low_cell], pressure_ptr[high_cell], dx, true);
+        let high_grad: f64 = boundary_pressure_gradient(boundaries.right, pressure_ptr[high_cell], pressure_ptr[low_cell], dx, false);
+        u_ptr[row * (nx + 1)] = u_ptr[row * (nx + 1)] - correction_scale * low_grad;
+        u_ptr[row * (nx + 1) + nx] = u_ptr[row * (nx + 1) + nx] - correction_scale * high_grad;
+        if (is_periodic(boundaries.left.kind)) { u_ptr[row * (nx + 1) + nx] = u_ptr[row * (nx + 1)]; }
+    }
+    for (col in 0..nx) {
+        let low_cell: u64 = col;
+        let high_cell: u64 = (ny - 1) * nx + col;
+        let low_grad: f64 = boundary_pressure_gradient(boundaries.bottom, pressure_ptr[low_cell], pressure_ptr[high_cell], dy, true);
+        let high_grad: f64 = boundary_pressure_gradient(boundaries.top, pressure_ptr[high_cell], pressure_ptr[low_cell], dy, false);
+        v_ptr[col] = v_ptr[col] - correction_scale * low_grad;
+        v_ptr[ny * nx + col] = v_ptr[ny * nx + col] - correction_scale * high_grad;
+        if (is_periodic(boundaries.bottom.kind)) { v_ptr[ny * nx + col] = v_ptr[col]; }
+    }
+    validate_finite_result(u_faces)?; validate_finite_result(v_faces)?;
+    mac_divergence_2d(nx, ny, dx, dy, u_faces, v_faces, divergence)?;
+    let final_divergence: f64 = max_abs(divergence)?;
+    return Ok(ProjectionReport {
+        iterations: iterations, pressure_residual: pressure_residual,
+        initial_divergence_max: initial_divergence, final_divergence_max: final_divergence,
+        converged: converged
+    });
+}
+
+// MAC projection whose pressure Poisson equation is solved with
+// preconditioned conjugate gradient. The operator of the CG is L = -A (the
+// positive discrete Laplacian; see PressurePreconditioner), so the method
+// requires a symmetric positive definite pressure system: the boundary set
+// must contain at least one pressure Dirichlet or outflow side, otherwise
+// InvalidBoundarySet is reported and callers should use the Jacobi or
+// multigrid projections (whose iteration does not require definiteness).
+// Preconditioner select: PressureJacobi (z = D^{-1} r with the pressure
+// diagonal) or PressureMultigrid (z = one V-cycle applied to r). The
+// inverse_diagonal span is used only for PressureJacobi; the work span,
+// level/sweep counts and relaxation only for PressureMultigrid; passing the
+// unused workspaces is required and they are simply not touched.
+// The convergence test uses the Euclidean norm of the CG residual; the
+// reported pressure_residual is the max-norm |A p - rhs| of the A-form, the
+// same quantity project_incompressible_mac_2d reports.
+pub fn project_incompressible_mac_pcg_2d(
+    nx: u64, ny: u64, dx: f64, dy: f64, dt: f64, density: f64,
+    boundaries: MACBoundaryConditions2D,
+    u_faces: Span<f64>, v_faces: Span<f64>, pressure: Span<f64>,
+    divergence: Span<f64>, residual: Span<f64>, direction: Span<f64>, product: Span<f64>,
+    z: Span<f64>, inverse_diagonal: Span<f64>, work: Span<f64>,
+    preconditioner: PressurePreconditioner, levels: u64, pre_smooth: u64, post_smooth: u64,
+    coarse_sweeps: u64, omega: f64, max_iterations: u64, tolerance: f64
+) -> Result<ProjectionReport, FluidError> {
+    if (!finite_f64(dx) || !finite_f64(dy) || dx <= 0.0 || dy <= 0.0) { return Err(InvalidSpacing); }
+    if (!finite_f64(dt) || dt <= 0.0) { return Err(InvalidTimestep); }
+    if (!finite_f64(density) || density <= 0.0) { return Err(InvalidDensity); }
+    if (!finite_f64(tolerance) || tolerance < 0.0) { return Err(InvalidTolerance); }
+    validate_boundaries(boundaries)?;
+    let cells: u64 = grid_cell_count_2d(nx, ny)?;
+    if (u_faces.len != mac_u_face_count_2d(nx, ny)? || v_faces.len != mac_v_face_count_2d(nx, ny)? ||
+        pressure.len != cells || divergence.len != cells || residual.len != cells ||
+        direction.len != cells || product.len != cells || z.len != cells) { return Err(DimensionMismatch); }
+    let has_pressure_reference: bool = is_pressure_dirichlet(boundaries.left.kind) ||
+        is_pressure_dirichlet(boundaries.right.kind) || is_pressure_dirichlet(boundaries.bottom.kind) ||
+        is_pressure_dirichlet(boundaries.top.kind);
+    if (!has_pressure_reference) { return Err(InvalidBoundarySet); }
+    let mut multigrid: bool = false;
+    match (preconditioner) {
+        PressureJacobi => { multigrid = false; }
+        PressureMultigrid => { multigrid = true; }
+    }
+    if (!multigrid) {
+        // PressureJacobi: only the inverse-diagonal workspace is required.
+        if (inverse_diagonal.len != cells) { return Err(DimensionMismatch); }
+    }
+    if (multigrid) {
+        // PressureMultigrid: the level hierarchy parameters and the multigrid
+        // work span are required (inverse_diagonal is left untouched).
+        let max_levels: u64 = mac_multigrid_level_count_2d(nx, ny)?;
+        if (levels == 0 || levels > max_levels) { return Err(InvalidGrid); }
+        if (pre_smooth == 0 || post_smooth == 0 || coarse_sweeps == 0) { return Err(InvalidRelaxation); }
+        if (!finite_f64(omega) || omega <= 0.0 || omega >= 2.0) { return Err(InvalidRelaxation); }
+        let mut required: u64 = cells;
+        let mut cx: u64 = nx;
+        let mut cy: u64 = ny;
+        let mut remaining: u64 = levels;
+        while (remaining > 1 && cx >= 6 && cy >= 6 && cx % 2 == 0 && cy % 2 == 0) {
+            cx = cx / 2;
+            cy = cy / 2;
+            let level_cells: u64 = checked_fluid_size(checked_mul(cx, cy))?;
+            let triple: u64 = checked_fluid_size(checked_mul(3, level_cells))?;
+            required = checked_fluid_size(checked_add(required, triple))?;
+            remaining = remaining - 1;
+        }
+        if (work.len < required) { return Err(DimensionMismatch); }
+    }
+    validate_finite(u_faces)?; validate_finite(v_faces)?;
+    mac_apply_velocity_boundaries_2d(nx, ny, boundaries, u_faces, v_faces)?;
+    mac_divergence_2d(nx, ny, dx, dy, u_faces, v_faces, divergence)?;
+    let initial_divergence: f64 = max_abs(divergence)?;
+    let rhs_scale: f64 = density / dt;
+    let correction_scale: f64 = dt / density;
+    if (!finite_f64(rhs_scale) || !finite_f64(correction_scale)) { return Err(NonFiniteResult); }
+    let mut pressure_ptr: *f64 = pressure.ptr;
+    let mut residual_ptr: *f64 = residual.ptr;
+    let mut direction_ptr: *f64 = direction.ptr;
+    let mut product_ptr: *f64 = product.ptr;
+    let mut z_ptr: *f64 = z.ptr;
+    for (i in 0..cells) { pressure_ptr[i] = 0.0; }
+    // CG on L = -A with b = -rhs: L p = -rhs is equivalent to A p = rhs.
+    // product holds the negated right-hand side during initialisation.
+    parfor (i in 0..cells) { product_ptr[i] = 0.0 - rhs_scale * divergence.ptr[i]; }
+    // residual r = b - L p = b (p starts at zero)
+    parfor (i in 0..cells) { residual_ptr[i] = product_ptr[i]; }
+    validate_finite_result(residual)?;
+    if (multigrid) {
+        parfor (i in 0..cells) { z_ptr[i] = 0.0; }
+        mac_pressure_v_cycle_2d(nx, ny, dx, dy, boundaries, residual, z, work,
+                                levels, pre_smooth, post_smooth, coarse_sweeps, omega)?;
+    } else {
+        mac_pressure_inverse_diagonal_2d(nx, ny, dx, dy, boundaries, inverse_diagonal)?;
+        parfor (i in 0..cells) { z_ptr[i] = inverse_diagonal.ptr[i] * residual_ptr[i]; }
+        validate_finite_result(z)?;
+    }
+    let mut rz: f64 = dot_cells(residual, z)?;
+    if (rz <= 0.0) { return Err(PressureCgBreakdown); }
+    parfor (i in 0..cells) { direction_ptr[i] = z_ptr[i]; }
+    let mut iterations: u64 = 0;
+    let mut converged: bool = false;
+    let mut residual_norm: f64 = cells_norm2(residual)?;
+    if (residual_norm <= tolerance) { converged = true; }
+    while (!converged && iterations < max_iterations) {
+        // product = L * direction = -(A * direction)
+        mac_pressure_operator_apply_2d(nx, ny, dx, dy, boundaries, direction, product)?;
+        negate_cells(product)?;
+        let denominator: f64 = dot_cells(direction, product)?;
+        if (denominator <= 0.0) { return Err(PressureCgBreakdown); }
+        let alpha: f64 = rz / denominator;
+        if (!finite_f64(alpha)) { return Err(NonFiniteResult); }
+        parfor (i in 0..cells) {
+            pressure_ptr[i] = pressure_ptr[i] + alpha * direction_ptr[i];
+            residual_ptr[i] = residual_ptr[i] - alpha * product_ptr[i];
+        }
+        validate_finite_result(pressure)?;
+        validate_finite_result(residual)?;
+        iterations = iterations + 1;
+        residual_norm = cells_norm2(residual)?;
+        if (residual_norm <= tolerance) { converged = true; break; }
+        if (multigrid) {
+            parfor (i in 0..cells) { z_ptr[i] = 0.0; }
+            mac_pressure_v_cycle_2d(nx, ny, dx, dy, boundaries, residual, z, work,
+                                    levels, pre_smooth, post_smooth, coarse_sweeps, omega)?;
+        } else {
+            parfor (i in 0..cells) { z_ptr[i] = inverse_diagonal.ptr[i] * residual_ptr[i]; }
+            validate_finite_result(z)?;
+        }
+        let next_rz: f64 = dot_cells(residual, z)?;
+        if (next_rz <= 0.0) { return Err(PressureCgBreakdown); }
+        if (rz == 0.0) { return Err(PressureCgBreakdown); }
+        let beta: f64 = next_rz / rz;
+        if (!finite_f64(beta)) { return Err(NonFiniteResult); }
+        parfor (i in 0..cells) { direction_ptr[i] = z_ptr[i] + beta * direction_ptr[i]; }
+        rz = next_rz;
+    }
+    // pressure_residual reports the same A-form max-norm as the other
+    // projections: max |A p - rhs| (serial deterministic maximum).
+    mac_pressure_operator_apply_2d(nx, ny, dx, dy, boundaries, pressure, product)?;
+    let mut pressure_residual: f64 = 0.0;
+    for (i in 0..cells) {
+        let error: f64 = fabs(product_ptr[i] - rhs_scale * divergence.ptr[i]);
+        if (error > pressure_residual) { pressure_residual = error; }
+    }
+    if (!finite_f64(pressure_residual)) { return Err(NonFiniteResult); }
+
+    // Correct internal face velocities exactly as project_incompressible_mac_2d
+    // does; duplicated (not shared) so the 0.2.1-validated projection stays
+    // byte-for-byte untouched.
+    let mut u_ptr: *f64 = u_faces.ptr; let mut v_ptr: *f64 = v_faces.ptr;
+    parfor (row in 0..ny) {
+        for (face in 1..nx) {
+            let left_cell: u64 = row * nx + face - 1;
+            let right_cell: u64 = row * nx + face;
+            let index: u64 = row * (nx + 1) + face;
+            u_ptr[index] = u_ptr[index] - correction_scale * (pressure_ptr[right_cell] - pressure_ptr[left_cell]) / dx;
+        }
+    }
+    parfor (face in 1..ny) {
+        for (col in 0..nx) {
+            let lower_cell: u64 = (face - 1) * nx + col;
+            let upper_cell: u64 = face * nx + col;
+            v_ptr[face * nx + col] = v_ptr[face * nx + col] - correction_scale * (pressure_ptr[upper_cell] - pressure_ptr[lower_cell]) / dy;
+        }
+    }
+    for (row in 0..ny) {
+        let low_cell: u64 = row * nx;
+        let high_cell: u64 = row * nx + nx - 1;
+        let low_grad: f64 = boundary_pressure_gradient(boundaries.left, pressure_ptr[low_cell], pressure_ptr[high_cell], dx, true);
+        let high_grad: f64 = boundary_pressure_gradient(boundaries.right, pressure_ptr[high_cell], pressure_ptr[low_cell], dx, false);
+        u_ptr[row * (nx + 1)] = u_ptr[row * (nx + 1)] - correction_scale * low_grad;
+        u_ptr[row * (nx + 1) + nx] = u_ptr[row * (nx + 1) + nx] - correction_scale * high_grad;
+        if (is_periodic(boundaries.left.kind)) { u_ptr[row * (nx + 1) + nx] = u_ptr[row * (nx + 1)]; }
+    }
+    for (col in 0..nx) {
+        let low_cell: u64 = col;
+        let high_cell: u64 = (ny - 1) * nx + col;
+        let low_grad: f64 = boundary_pressure_gradient(boundaries.bottom, pressure_ptr[low_cell], pressure_ptr[high_cell], dy, true);
+        let high_grad: f64 = boundary_pressure_gradient(boundaries.top, pressure_ptr[high_cell], pressure_ptr[low_cell], dy, false);
+        v_ptr[col] = v_ptr[col] - correction_scale * low_grad;
+        v_ptr[ny * nx + col] = v_ptr[ny * nx + col] - correction_scale * high_grad;
+        if (is_periodic(boundaries.bottom.kind)) { v_ptr[ny * nx + col] = v_ptr[col]; }
+    }
+    validate_finite_result(u_faces)?; validate_finite_result(v_faces)?;
+    mac_divergence_2d(nx, ny, dx, dy, u_faces, v_faces, divergence)?;
+    let final_divergence: f64 = max_abs(divergence)?;
+    return Ok(ProjectionReport {
+        iterations: iterations, pressure_residual: pressure_residual,
+        initial_divergence_max: initial_divergence, final_divergence_max: final_divergence,
+        converged: converged
+    });
 }

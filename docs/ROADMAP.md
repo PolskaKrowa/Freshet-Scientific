@@ -1,5 +1,32 @@
 # Roadmap
 
+## 0.3.0 — multigrid, GMRES, sparse global analysis and the FDO format
+
+Implemented in this release (developed against an independent Python
+reference of every algorithm; see `docs/VALIDATION.md` for the revalidation
+plan with the reference compiler):
+
+- Numerics: validated matrix representations (`dense_matrix_validate_f64`,
+  `dense_matrix_is_symmetric_f64`, `csr_merge_duplicates_f64`,
+  `csr_is_symmetric_f64`) and the restarted, right-preconditioned
+  `preconditioned_gmres_f64` with `IdentityPreconditionerF64`.
+- Fluid: geometric multigrid (cell-centred 2:1 hierarchy, boundary-blind
+  piecewise-constant prolongation and block-average restriction with the
+  exact R·A·P = 2·A₂h rediscretisation identity), the standalone multigrid
+  projection, Jacobi- and multigrid-preconditioned CG pressure projections
+  and parallel coarse-grid correction kernels.
+- Mechanics: sparse global structural analysis (global truss assembly in
+  2D/3D, sparse Dirichlet elimination, sparse PCG solve, support reactions,
+  element post-processing and equilibrium checks).
+- Data: the FDO (Freshet-Data Optimised) file format with magic identifier,
+  version, byte-order marker, dimensions, column schema and units, offsets,
+  sizes, Adler-32 checksums, binary payloads and optional run-length
+  compression with raw fallback.
+
+Still open from the 0.3 plan: benchmark datasets and throughput/bandwidth
+reporting for the new kernels, property-based/differential test harnesses,
+and CI that records the exact compiler configuration.
+
 ## 0.2.1 — first reference-compiler validation
 
 The complete 0.2.0 surface was compiled, linked and executed against the
@@ -31,32 +58,20 @@ Implemented in this release:
   vectors, material properties, statics, beam reference formulae, truss
   elements, stress invariants and 1D axial-bar FEM assembly/solve.
 
-## 0.3 — validation and performance evidence
-
-- Run the complete test suites on the supported Penstock/compiler versions and
-  add CI that records the exact compiler and target configuration.
-- Add benchmark datasets for dense/CSR SpMV, Krylov solvers, binary ingestion,
-  fluid timesteps and Mechanics assembly/solve. Report throughput, bandwidth,
-  memory footprint and convergence/residual alongside wall time.
-- Add property-based and differential tests for CSR structure, solver
-  convergence, endian I/O, boundary fluxes, dimensional algebra and FEM
-  equilibrium.
-- Consider GMRES, incomplete-factorisation preconditioners and sparse FEM
-  assembly after CSR and operator APIs have benchmark coverage.
-
 ## Subsequent development
 
 ### Numerics
 
-- GMRES and restarted Krylov methods, ILU/IC preconditioning, block CSR,
-  sparse assembly utilities and mixed precision.
+- Restarted Krylov comparisons (GMRES(m) sensitivity) and ILU/IC
+  preconditioning on merged CSR structures, block CSR, sparse assembly
+  utilities and mixed precision.
 - Factorisations and preconditioner comparisons tied to real application
   matrices.
 
 ### Data
 
-- Compression and checksummed block formats, richer schema/catalogue metadata,
-  filtered column projection, parallel decode/encode and general transform
+- Parallel FDO encode/decode, dictionary/filter codecs beyond run-length,
+  richer catalogue metadata, filtered column projection and general transform
   callbacks. Quantiles and approximate sketches may follow exact statistics.
 
 ### Fluid
@@ -65,13 +80,14 @@ Implemented in this release:
   conservative momentum fluxes and higher-order reconstruction. The current
   Re=100 cavity run is a transient profile-producing demonstration, not yet
   validated against a published steady-state reference dataset.
-- 3D pressure projection, variable-density and thermal/energy models, then
-  turbulence closures and more advanced meshes.
+- 3D pressure projection (including the 3D multigrid hierarchy), variable-density
+  and thermal/energy models, then turbulence closures and more advanced meshes.
 
 ### Mechanics
 
-- Sparse FEM assembly/solution, 2D/3D truss model assembly, frame/beam finite
-  elements and validation against analytical/reference cases.
+- Beam/frame finite elements in the global assembly, distributed loads,
+  validation against analytical/reference cases beyond trusses, and sparse
+  factorisation-based solvers.
 - More constitutive behaviour only after verification and test cases exist.
 
 GPU/accelerator execution, distributed-memory decomposition, adaptive meshes,

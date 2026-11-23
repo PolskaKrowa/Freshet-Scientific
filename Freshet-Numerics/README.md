@@ -24,6 +24,8 @@ import freshet_numerics;
 | `matvec_f64(n, A, x, y)` | Row-major dense square matrix-vector product |
 | `matmul_f64(m,k,n,A,B,C)` | Dense row-major product |
 | `blocked_matmul_f64(...)` | Caller-selected tiled dense product |
+| `dense_matrix_validate_f64(A)` | Validate a `DenseMatrixF64` view (shape + finiteness) |
+| `dense_matrix_is_symmetric_f64(A)` | Exact mirrored-entry symmetry of a square dense view |
 
 The norm avoids squaring raw magnitudes and therefore handles many vectors
 whose direct sum of squares would overflow or underflow. A norm whose true
@@ -43,7 +45,14 @@ offsets, column indices and values. `csr_validate` checks structural and index
 invariants; `csr_matvec_f64` applies it. `coo_to_csr_f64` assembles caller
 provided COO entries into caller-owned CSR output arrays and workspace.
 Duplicate entries are retained and contribute additively during SpMV; entries
-are not sorted or coalesced by the conversion routine.
+are not sorted or coalesced by the conversion routine. `csr_merge_duplicates_f64`
+canonicalises a CSR matrix afterwards: within each row the stored entries are
+insertion-sorted by column index and duplicates are summed, producing the single
+entry per (row, column) representation that preconditioners and future
+incomplete factorisations expect; it returns the merged nonzero count.
+`csr_is_symmetric_f64` checks numerical symmetry directly on
+duplicate-carrying matrices (cost O(nnz * row length); an inspection kernel,
+not a hot path), matching `dense_matrix_is_symmetric_f64` on the dense side.
 
 The static-dispatch `LinearOperatorF64` trait represents `y = A*x`. Dense
 and CSR types implement it, and `DiagonalOperatorF64` ships as the
@@ -63,10 +72,19 @@ Implemented iterative solvers:
 - `preconditioned_conjugate_gradient_f64` for SPD operators with a suitable
   positive preconditioner.
 - `bicgstab_f64` for general nonsymmetric operators.
+- `preconditioned_gmres_f64`: restarted GMRES(m) with modified Gram-Schmidt
+  Arnoldi and Givens rotations for general (possibly nonsymmetric) operators,
+  right-preconditioned through any `PreconditionerF64`. The residual norm in
+  the returned report is recomputed from `b - A x` rather than trusted from
+  the least squares estimate. The workspaces (Krylov basis, Hessenberg
+  coefficients, rotations, triangular-solve coefficients and update vector)
+  are caller-owned; see the function documentation for the exact lengths.
+- `IdentityPreconditionerF64` (z = r) makes plain GMRES the identity-
+  preconditioned case without a second solver variant.
 - `diagonal_inverse_f64` and `csr_inverse_diagonal_f64` for Jacobi inverse
   diagonals; `JacobiPreconditionerF64` applies one to a residual.
 
-GMRES, sparse direct factorisation, incomplete-factorisation preconditioners,
+Sparse direct factorisation, incomplete-factorisation preconditioners,
 block sparse formats and distributed sparse assembly are not implemented in
 this release.
 
@@ -78,6 +96,10 @@ this release.
   A non-positive `pᵀAp` is `NotPositiveDefinite`; breakdowns are explicit.
 - Iteration limits are reported through `converged = false`, not silently
   treated as success.
+- GMRES reports lucky breakdown of the Arnoldi process as convergence of the
+  current restart cycle (the Krylov space already contains the exact
+  solution); a zero Givens denominator or non-finite coefficient is reported
+  as `SolverBreakdown`/`NonFiniteResult`.
 - Matrix/vector/workspace spans must have the documented lengths and should
   not overlap unless explicitly supported. `axpy_f64` supports exact `x`/`y`
   aliasing; partial overlap is not supported.
@@ -87,7 +109,9 @@ this release.
 ## Example
 
 See [`examples/sparse_pcg.fsht`](examples/sparse_pcg.fsht) for COO assembly,
-CSR conversion and Jacobi-preconditioned CG.
+CSR conversion and Jacobi-preconditioned CG, and
+[`examples/gmres_solver.fsht`](examples/gmres_solver.fsht) for restarted
+GMRES on a small nonsymmetric system.
 
 ## Build and test
 

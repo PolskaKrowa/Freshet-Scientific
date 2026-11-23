@@ -1,0 +1,39 @@
+// Nonsymmetric system solved with restarted GMRES(2) and an identity
+// preconditioner. The solver call lives in a helper rather than fn main()
+// (see sparse_pcg.fsht: the current Penstock development compiler crashes
+// when fn main() itself instantiates a trait-generic function).
+import freshet_numerics;
+
+fn solve_nonsymmetric_gmres() {
+    // A = [ 4 1 ; 2 3 ], b = (1, 2) -> x = (0.1, 0.6)
+    let matrix_values: [f64; 4] = [4.0, 1.0, 2.0, 3.0];
+    let matrix: DenseMatrixF64 = DenseMatrixF64 { rows: 2, cols: 2, values: span(matrix_values) };
+    let b: [f64; 2] = [1.0, 2.0];
+    let mut x: [f64; 2] = [0.0, 0.0];
+    // restart = 2: one basis of size 2 per restart cycle
+    let mut krylov: [f64; 6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut hessenberg: [f64; 6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut cosines: [f64; 2] = [0.0, 0.0];
+    let mut sines: [f64; 2] = [0.0, 0.0];
+    let mut givens_rhs: [f64; 3] = [0.0, 0.0, 0.0];
+    let mut y_coefficients: [f64; 2] = [0.0, 0.0];
+    let mut update: [f64; 2] = [0.0, 0.0];
+    let identity: IdentityPreconditionerF64 = IdentityPreconditionerF64 { };
+    let solved: Result<KrylovReport, NumericsError> = preconditioned_gmres_f64(
+        matrix, identity, 2, span(b), span(x), span(krylov), span(hessenberg),
+        span(cosines), span(sines), span(givens_rhs), span(y_coefficients), span(update),
+        2, 20, 1.0e-12);
+    match (solved) {
+        Ok(report) => {
+            print("converged="); if (report.converged) { print("true"); } else { print("false"); }
+            print(" inner_steps="); print_u64(report.iterations);
+            print(" residual="); print_f64(report.residual_norm, 12); println();
+            print("x = "); print_f64(x[0], 8); print(" "); print_f64(x[1], 8); println();
+        }
+        Err(error) => { print("gmres failed"); println(); }
+    }
+}
+
+fn main() {
+    solve_nonsymmetric_gmres();
+}
