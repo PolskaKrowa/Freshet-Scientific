@@ -156,7 +156,11 @@ fn fdo_type_from_code(code: u64) -> Result<ColumnType, DataError> {
 }
 
 // A usable name/unit: NUL-terminated within 16 bytes of its C-string form
-// (so at most 15 characters) and every character printable ASCII.
+// (so at most 15 characters) and every character printable ASCII. The
+// borrowed C-string copy is freed exactly once on every path: a free on a
+// branch joins into a maybe-freed state (F0301) that poisons every later
+// use, so the error cases record flags and all paths flow through the
+// single unconditional free.
 fn fdo_name_length(name: str) -> Result<u64, DataError> {
     let c_string: *u8 = str_to_cstr(name);
     let mut length: u64 = 16;
@@ -164,12 +168,15 @@ fn fdo_name_length(name: str) -> Result<u64, DataError> {
     for (i in 0..16) {
         if (c_string[i] == 0) { length = i; terminated = true; break; }
     }
-    if (!terminated) { free(c_string); return Err(InvalidSchema); }
-    for (i in 0..length) {
-        let byte: u8 = c_string[i];
-        if (byte < 32 || byte > 126) { free(c_string); return Err(InvalidSchema); }
+    let mut printable: bool = true;
+    if (terminated) {
+        for (i in 0..length) {
+            let byte: u8 = c_string[i];
+            if (byte < 32 || byte > 126) { printable = false; break; }
+        }
     }
     free(c_string);
+    if (!terminated || !printable) { return Err(InvalidSchema); }
     return Ok(length);
 }
 
@@ -340,7 +347,11 @@ pub fn fdo_write(
     let metadata: *u8 = malloc(u8, metadata_bytes);
     defer free(metadata);
     let metadata_span: Span<u8> = span(metadata, metadata_bytes);
-    let mut metadata_ptr: *u8 = metadata;
+    // the header-writing alias must come from the span's pointer field: an
+    // identifier-initialised alias (let ... = metadata) reads as a move of
+    // the owner while the span view is live (F0310), while a field access
+    // aliases the storage without transferring it
+    let mut metadata_ptr: *u8 = metadata_span.ptr;
     metadata_ptr[0] = 70; metadata_ptr[1] = 68; metadata_ptr[2] = 79; metadata_ptr[3] = 49;
     metadata_ptr[4] = 1;
     if (file_little) { metadata_ptr[5] = 76; } else { metadata_ptr[5] = 66; }

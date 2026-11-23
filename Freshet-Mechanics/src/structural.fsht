@@ -317,7 +317,9 @@ pub fn element_axial_results_2d(
     let ux2: f64 = displacement.ptr[2 * b]; let uy2: f64 = displacement.ptr[2 * b + 1];
     let force: Result<f64, MechanicsError> = truss_axial_force_2d(x1, y1, x2, y2, ux1, uy1, ux2, uy2,
         young_modulus_pa.ptr[element], cross_section_area_m2.ptr[element]);
-    let axial_force: f64;
+    // let requires an initializer; the match arm then assigns the unwrapped
+    // value (the declare-with-default-then-match-assign corpus shape).
+    let mut axial_force: f64 = 0.0;
     match (force) {
         Ok(value) => { axial_force = value; }
         Err(error) => { return Err(error); }
