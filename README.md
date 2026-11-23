@@ -1,3 +1,6 @@
+<div align=center>
+   <img width="612" height="408" alt="freshet-scientific_logo" src="https://github.com/user-attachments/assets/59620e8a-4336-45f9-b2fa-5406f9d5ad62" />
+</div>
 # Freshet-Scientific
 
 **Scientific, engineering and high-throughput data libraries for the Freshet programming language.**
