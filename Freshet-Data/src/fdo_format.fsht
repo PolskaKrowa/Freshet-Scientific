@@ -144,15 +144,15 @@ fn fdo_type_code(data_type: ColumnType) -> Result<u64, DataError> {
     return Ok(code);
 }
 
+// Integer dispatch is an if/else chain: match arms are variant patterns,
+// so literal arms do not parse. Unknown codes are schema errors, matching
+// the strict type_code > 3 check of fdo_verify_file.
 fn fdo_type_from_code(code: u64) -> Result<ColumnType, DataError> {
-    let mut data_type: ColumnType = F64;
-    match (code) {
-        0 => { data_type = F64; }
-        1 => { data_type = F32; }
-        2 => { data_type = I64; }
-        3 => { data_type = U64; }
-    }
-    return Ok(data_type);
+    if (code == 0) { return Ok(F64); }
+    if (code == 1) { return Ok(F32); }
+    if (code == 2) { return Ok(I64); }
+    if (code == 3) { return Ok(U64); }
+    return Err(InvalidSchema);
 }
 
 // A usable name/unit: NUL-terminated within 16 bytes of its C-string form

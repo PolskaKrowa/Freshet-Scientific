@@ -1297,9 +1297,14 @@ pub fn mac_pressure_v_cycle_2d(
                                   current_rhs, current_error, current_defect, pre_smooth, omega)?;
         mac_pressure_operator_apply_2d(level_nx, level_ny, level_hx, level_hy, homogenized,
                                        current_error, current_defect)?;
-        let mut defect_ptr: *f64 = current_defect.ptr;
-        let rhs_ptr: *f64 = current_rhs.ptr;
-        parfor (i in 0..level_cells) { defect_ptr[i] = rhs_ptr[i] - defect_ptr[i]; }
+        // The parfor write-root check resolves bindings at function scope
+        // only, so the per-level pointer aliases are declared inside the
+        // loop body (loop-local bindings are the supported shape).
+        parfor (i in 0..level_cells) {
+            let mut defect_ptr: *f64 = current_defect.ptr;
+            let rhs_ptr: *f64 = current_rhs.ptr;
+            defect_ptr[i] = rhs_ptr[i] - defect_ptr[i];
+        }
         validate_finite_result(current_defect)?;
         let fine_nx: u64 = level_nx;
         let fine_ny: u64 = level_ny;
@@ -1311,8 +1316,10 @@ pub fn mac_pressure_v_cycle_2d(
         let next_error: Span<f64> = work[(level_offset + next_cells)..(level_offset + next_cells + next_cells)];
         let next_defect: Span<f64> = work[(level_offset + next_cells + next_cells)..(level_offset + next_triple)];
         mac_restrict_full_weighting_2d(fine_nx, fine_ny, current_defect, next_rhs)?;
-        let mut next_error_ptr: *f64 = next_error.ptr;
-        parfor (i in 0..next_cells) { next_error_ptr[i] = 0.0; }
+        parfor (i in 0..next_cells) {
+            let mut next_error_ptr: *f64 = next_error.ptr;
+            next_error_ptr[i] = 0.0;
+        }
         current_rhs = next_rhs;
         current_error = next_error;
         current_defect = next_defect;
