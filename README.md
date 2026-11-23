@@ -23,16 +23,6 @@ compiler source modifications.
 | **Freshet-Fluid** | Structured-grid incompressible CFD | Consistent 2D MAC-grid pressure projection, the pressure operator and diagonal as public kernels, geometric multigrid (boundary-blind piecewise-constant prolongation and block-average restriction, parallel coarse-grid correction), multigrid and Jacobi/`PressureMultigrid`-preconditioned CG pressure projections, pressure residual and divergence reports, boundary-condition types, conservative periodic and closed-wall scalar fluxes, Heun RK2, 3D MAC divergence and a lid-driven cavity profile example |
 | **Freshet-Mechanics** | Engineering and structural mechanics | SI dimensional quantities, 2D/3D vectors, isotropic materials, statics, beam formulae, 2D/3D truss element stiffness, stress invariants, a 1D axial-bar FEM assembly/solve path, and sparse global structural analysis: global truss COO assembly (2D/3D), sparse Dirichlet elimination, sparse PCG solve, support reactions, element post-processing and equilibrium checks |
 
-This is a substantial **0.3.0 research foundation** — extending the first
-release validated end-to-end against the reference Penstock compiler — not a
-declaration that every numerical model is validated for safety-critical design
-or production CFD. Solver convergence, conditioning, boundary-condition
-suitability and model assumptions remain application responsibilities.
-Advanced 3D flow, nonlinear/large-deformation mechanics, high-order FEM, GPU
-execution and parallel/distributed I/O remain future work. The 0.3.0 sources
-were developed against an independent Python reference of every new
-algorithm and the package environment's static checks; revalidation with the
-reference compiler is documented in `docs/VALIDATION.md`.
 
 ## Design principles
 
