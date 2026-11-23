@@ -155,8 +155,12 @@ pub fn sum_f64(input: Span<f64>) -> Result<f64, NumericsError> {
 pub fn max_f64(input: Span<f64>) -> Result<f64, NumericsError> {
     if (input.len == 0) { return Err(InvalidDimension); }
     validate_finite_span(input)?;
+    // Serial deterministic maximum: Penstock 0.1.0 lowers floating-point
+    // min/max parfor reductions to llvm.fmin/llvm.fmax, which LLVM 20-23 do
+    // not provide, so this kernel avoids that construct until the reference
+    // compiler emits llvm.maxnum/llvm.minimum for the backend matrix.
     let mut maximum: f64 = input.ptr[0];
-    @reproducible parfor (i in 0..input.len) [reduction(max:maximum)] {
+    for (i in 0..input.len) {
         if (input.ptr[i] > maximum) { maximum = input.ptr[i]; }
     }
     return Ok(maximum);
@@ -391,6 +395,47 @@ impl PreconditionerF64 for JacobiPreconditionerF64 {
         parfor (i in 0..residual.len) { output_ptr[i] = preconditioner.inverse_diagonal.ptr[i] * residual.ptr[i]; }
         validate_finite_result_span(output)?;
         return Ok(residual.len);
+    }
+}
+
+// Matrix-free diagonal operator: y = D*x with a caller-owned diagonal span.
+// Penstock's current generic-instantiation visibility rules resolve trait
+// impls from the module that owns the generic solver, so operator types must
+// be declared in (or be visible from) this module; the library therefore
+// ships this diagonal operator as its provided matrix-free example.
+pub struct DiagonalOperatorF64 { diagonal: Span<f64> }
+
+pub impl LinearOperatorF64 for DiagonalOperatorF64 {
+    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsError> {
+        if (operator.diagonal.len != x.len || y.len != x.len) { return Err(DimensionMismatch); }
+        validate_finite_span(operator.diagonal)?;
+        validate_finite_span(x)?;
+        let mut output_ptr: *f64 = y.ptr;
+        parfor (i in 0..x.len) { output_ptr[i] = operator.diagonal.ptr[i] * x.ptr[i]; }
+        validate_finite_result_span(y)?;
+        return Ok(x.len);
+    }
+}
+
+// Contract-violating operator fixtures for the solver's validation paths:
+// ShortOperatorF64 returns a count that does not cover the full output span
+// and OverflowOperatorF64 produces non-finite values from finite input. They
+// exist so the test suite can exercise the documented return-count and
+// non-finite-output checks; they must not be used as real operators.
+pub struct ShortOperatorF64 { }
+pub struct OverflowOperatorF64 { }
+
+pub impl LinearOperatorF64 for ShortOperatorF64 {
+    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsError> {
+        return Ok(x.len - 1);
+    }
+}
+
+pub impl LinearOperatorF64 for OverflowOperatorF64 {
+    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsError> {
+        let mut output_ptr: *f64 = y.ptr;
+        parfor (i in 0..x.len) { output_ptr[i] = x.ptr[i] * 1.0e308; }
+        return Ok(x.len);
     }
 }
 

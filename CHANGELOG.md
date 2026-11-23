@@ -1,5 +1,89 @@
 # Changelog
 
+## 0.2.1 — 2026-11-23
+
+First release validated against the real Penstock reference compiler (a
+current development build of `fsht-03:03` with its default LLVM 23 SDK).
+The 0.2.0 sources had never been compiled; every change below was found by
+running `penstock build` / `penstock test` and is confined to this repository
+— no changes were made to Freshet-lang or Penstock.
+
+### Compiler-diagnostic fixes (source surface)
+- Removed the dotted enum-variant spelling `MechanicsError.X` used throughout
+  Freshet-Mechanics; Penstock parses `A.B` as field access, so variants are
+  written by their (already `Mechanics`-prefixed) bare context-resolved
+  names, for example `Err(MechanicsDimensionMismatch)`. The mixed-import
+  convention is unchanged: Mechanics variants keep the `Mechanics` prefix so
+  they never collide with the concise `NumericsError` variants.
+- Marked the cast-derived record-batch alias pointers in the Freshet-Data
+  tests `let mut`: writes through non-owned immutable pointer bindings are
+  rejected by Penstock's pointer-mutability rule (F0208).
+- Renamed the loop variable `step` in the lid-driven cavity example
+  (`step_index`): `step` is a reserved keyword and the example did not parse
+  (F0102).
+- Moved the trait-generic solver call in `examples/sparse_pcg.fsht` out of
+  `fn main()` into a helper function: the current Penstock development
+  compiler crashes when `fn main()` itself instantiates a trait-generic
+  function, while the identical call from an ordinary function or an `@test`
+  function compiles and runs correctly.
+
+### Cross-module trait dispatch
+- Moved the matrix-free operator fixtures out of the test module into
+  Freshet-Numerics itself: `DiagonalOperatorF64` is now a documented public
+  diagonal operator, and the two intentionally contract-violating fixtures
+  (`ShortOperatorF64`, `OverflowOperatorF64`) ship with the library so the
+  solver validation tests can exercise them. Penstock's current
+  generic-instantiation visibility rules resolve trait impls from the module
+  that owns the generic function, so operator types must be visible from
+  `freshet_numerics`; the Numerics README now states this constraint instead
+  of claiming arbitrary application modules can implement the trait.
+
+### Numerical fixes
+- The MAC pressure projection now uses a weighted (under-relaxed) Jacobi
+  sweep with omega = 0.8. Plain Jacobi's odd-even "checkerboard" mode is an
+  eigenvalue -1 mode of the periodic and homogeneous-Neumann 5-point operator
+  on even grids, so the unweighted sweep never damps it and the pressure
+  residual stalls at the checkerboard energy of the right-hand side for
+  general velocity fields (the two previously failing projection tests
+  exposed exactly this). The relaxed sweep keeps the exact discrete solution
+  as its fixed point and preserves the disjoint parallel writes; all twelve
+  Fluid tests now pass, including the previously stalling periodic and cavity
+  projections.
+- Replaced the five floating-point `[reduction(max:…)]` parfor kernels
+  (`max_f64`, `stable_timestep_2d`, `mac_stable_timestep_2d`, the projection
+  residual maximum and the internal `max_abs` helper) with serial
+  deterministic maxima, and the projection residual pass with a serial pass.
+  Penstock 0.1.0 lowers floating-point min/max parfor reductions to
+  `llvm.fmin`/`llvm.fmax`, which do not exist in LLVM 20-23, so every such
+  kernel failed to link with the reference backend. Integer reductions and
+  `reduction(+:…)` are unaffected and remain parallel. The serial maxima are
+  noted in the sources and can return to parfor when the reference compiler
+  emits `llvm.maxnum`/`llvm.minimum` for the backend matrix.
+
+### Memory-safety fix in Freshet-Data
+- The binary I/O tests closed every handle explicitly *and* through `defer`,
+  double-`fclose`-ing each `FILE*` and aborting glibc ("double free detected
+  in tcache 2"). Tests now close each handle exactly once (deferred) and
+  call `binary_flush` where data must be visible before the deferred close
+  fires. `binary_close` documents the exactly-once contract: a
+  `borrowed mut` close cannot invalidate the caller's copy of the handle
+  struct (fsht-03:02 aggregate borrows do not write back), so a second close
+  of the same handle is undefined.
+
+### Test corrections
+- The boundary-value regression in Freshet-Fluid now asserts the documented
+  contract: a bottom Wall's tangential speed drives the bottom row of u
+  faces (and the left Inflow's tangential value the first interior column of
+  v); it previously asserted an interior u column that the operator does not
+  and should not touch.
+
+### Validation (see docs/VALIDATION.md)
+- All four test suites were compiled and executed with the reference
+  compiler and its LLVM 23 backend: Numerics 16/16, Fluid 12/12, Data 19/19,
+  Mechanics 16/16. All four static-library targets build
+  (`libfreshet_*.a`), and every example runs, including the 500-step Re=100
+  lid-driven cavity. No changes were made to Freshet-lang or Penstock.
+
 ## 0.2.0 — 2026-11-22
 
 ### Compiler diagnostic follow-up

@@ -19,7 +19,7 @@ import freshet_numerics;
     let added: Result<QuantitySI, MechanicsError> = quantity_add_si(a, b);
     let mismatch: Result<QuantitySI, MechanicsError> = quantity_add_si(a, wrong);
     match (added) { Ok(value) => { assert(value.value == 302.0 && value.length_power == 1); } Err(error) => { assert(false); } }
-    match (mismatch) { Ok(value) => { assert(false); } Err(MechanicsError.MechanicsDimensionMismatch) => { assert(true); } Err(error) => { assert(false); } }
+    match (mismatch) { Ok(value) => { assert(false); } Err(MechanicsDimensionMismatch) => { assert(true); } Err(error) => { assert(false); } }
     assert(millimetres(25.0) == 0.025);
 }
 
@@ -49,7 +49,7 @@ import freshet_numerics;
         Err(error) => { assert(false); }
     }
     let invalid: Result<IsotropicMaterial, MechanicsError> = isotropic_material(1.0, 0.5, 1.0, 1.0);
-    match (invalid) { Ok(material) => { assert(false); } Err(MechanicsError.InvalidMaterial) => { assert(true); } Err(error) => { assert(false); } }
+    match (invalid) { Ok(material) => { assert(false); } Err(InvalidMaterial) => { assert(true); } Err(error) => { assert(false); } }
 }
 
 
@@ -60,8 +60,8 @@ import freshet_numerics;
     };
     let shear: Result<f64, MechanicsError> = shear_modulus_pa(invalid);
     let bulk: Result<f64, MechanicsError> = bulk_modulus_pa(invalid);
-    match (shear) { Ok(value) => { assert(false); } Err(MechanicsError.InvalidMaterial) => { assert(true); } Err(error) => { assert(false); } }
-    match (bulk) { Ok(value) => { assert(false); } Err(MechanicsError.InvalidMaterial) => { assert(true); } Err(error) => { assert(false); } }
+    match (shear) { Ok(value) => { assert(false); } Err(InvalidMaterial) => { assert(true); } Err(error) => { assert(false); } }
+    match (bulk) { Ok(value) => { assert(false); } Err(InvalidMaterial) => { assert(true); } Err(error) => { assert(false); } }
 }
 
 @test fn beam_reference_cases_match_closed_form() {
@@ -146,8 +146,8 @@ import freshet_numerics;
     let candela: QuantitySI = QuantitySI { value: 1.0, length_power: 0, mass_power: 0, time_power: 0, current_power: 0, temperature_power: 0, amount_power: 0, luminous_intensity_power: 1 };
     let current_plus_mole: Result<QuantitySI, MechanicsError> = quantity_add_si(ampere, mole);
     let mole_plus_candela: Result<QuantitySI, MechanicsError> = quantity_add_si(mole, candela);
-    match (current_plus_mole) { Ok(value) => { assert(false); } Err(MechanicsError.MechanicsDimensionMismatch) => { assert(true); } Err(error) => { assert(false); } }
-    match (mole_plus_candela) { Ok(value) => { assert(false); } Err(MechanicsError.MechanicsDimensionMismatch) => { assert(true); } Err(error) => { assert(false); } }
+    match (current_plus_mole) { Ok(value) => { assert(false); } Err(MechanicsDimensionMismatch) => { assert(true); } Err(error) => { assert(false); } }
+    match (mole_plus_candela) { Ok(value) => { assert(false); } Err(MechanicsDimensionMismatch) => { assert(true); } Err(error) => { assert(false); } }
     assert(milliamperes(250.0) == 0.25);
 }
 
@@ -163,7 +163,7 @@ import freshet_numerics;
     }
     let zero: Vector2 = Vector2 { x: 0.0, y: 0.0 };
     let invalid: Result<Vector2, MechanicsError> = normalise2(zero);
-    match (invalid) { Ok(result) => { assert(false); } Err(MechanicsError.InvalidGeometry) => { assert(true); } Err(error) => { assert(false); } }
+    match (invalid) { Ok(result) => { assert(false); } Err(InvalidGeometry) => { assert(true); } Err(error) => { assert(false); } }
 }
 
 

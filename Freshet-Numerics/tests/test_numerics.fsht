@@ -1,33 +1,5 @@
 import freshet_numerics;
 
-struct DiagonalOperatorF64 { diagonal: Span<f64> }
-struct ShortOperatorF64 { }
-struct OverflowOperatorF64 { }
-
-impl LinearOperatorF64 for ShortOperatorF64 {
-    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsError> {
-        return Ok(x.len - 1);
-    }
-}
-
-
-impl LinearOperatorF64 for OverflowOperatorF64 {
-    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsError> {
-        let mut output_ptr: *f64 = y.ptr;
-        parfor (i in 0..x.len) { output_ptr[i] = x.ptr[i] * 1.0e308; }
-        return Ok(x.len);
-    }
-}
-
-impl LinearOperatorF64 for DiagonalOperatorF64 {
-    fn apply(operator: Self, x: Span<f64>, y: Span<f64>) -> Result<u64, NumericsError> {
-        if (operator.diagonal.len != x.len || y.len != x.len) { return Err(DimensionMismatch); }
-        let mut output_ptr: *f64 = y.ptr;
-        parfor (i in 0..x.len) { output_ptr[i] = operator.diagonal.ptr[i] * x.ptr[i]; }
-        return Ok(x.len);
-    }
-}
-
 @test fn dot_is_correct_and_reproducible() {
     let a: [f64; 4] = [1.0, 2.0, 3.0, 4.0];
     let b: [f64; 4] = [4.0, 3.0, 2.0, 1.0];

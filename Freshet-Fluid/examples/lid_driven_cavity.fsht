@@ -34,8 +34,8 @@ fn main() {
     // U=1, L=1 and nu=0.01 gives the conventional Re=100 cavity case.
     print("Reynolds number="); print_f64(1.0 / viscosity, 1); println();
     let mut last_divergence: f64 = 0.0;
-    let mut step: u64 = 0;
-    while (step < 500) {
+    let mut step_index: u64 = 0;
+    while (step_index < 500) {
         let stable: Result<f64, FluidError> = mac_stable_timestep_2d(
             nx, ny, dx, dy, viscosity, 0.4, span(u, u_count), span(v, v_count));
         let mut dt: f64 = 0.001;
@@ -52,11 +52,11 @@ fn main() {
             Ok(report) => { last_divergence = report.final_divergence_max; }
             Err(error) => { print("projection error"); println(); return; }
         }
-        if (step % 50 == 0) {
-            print("step="); print_u64(step);
+        if (step_index % 50 == 0) {
+            print("step_index="); print_u64(step_index);
             print(" divergence="); print_f64(last_divergence, 10); println();
         }
-        step = step + 1;
+        step_index = step_index + 1;
     }
     print("final max divergence="); print_f64(last_divergence, 12); println();
     // Report the two centreline profiles as reproducible benchmark observables.

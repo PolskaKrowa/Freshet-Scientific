@@ -5,7 +5,7 @@ import freshet_numerics;
 fn checked_matrix_entries(node_count: u64) -> Result<u64, MechanicsError> {
     match (checked_mul(node_count, node_count)) {
         Some(value) => { return Ok(value); }
-        None => { return Err(MechanicsError.MechanicsSizeOverflow); }
+        None => { return Err(MechanicsSizeOverflow); }
     }
 }
 
@@ -18,29 +18,29 @@ pub fn assemble_bar_system_1d(
     node_a: Span<u64>, node_b: Span<u64>, young_modulus_pa: f64, area_m2: f64,
     stiffness: Span<f64>, load: Span<f64>
 ) -> Result<u64, MechanicsError> {
-    if (node_count < 2 || element_count == 0) { return Err(MechanicsError.MechanicsInvalidDimension); }
+    if (node_count < 2 || element_count == 0) { return Err(MechanicsInvalidDimension); }
     let matrix_entries: u64 = checked_matrix_entries(node_count)?;
     if (coordinates_m.len != node_count || node_a.len != element_count || node_b.len != element_count ||
-        stiffness.len != matrix_entries || load.len != node_count) { return Err(MechanicsError.MechanicsDimensionMismatch); }
-    if (!mechanics_finite_f64(young_modulus_pa) || !mechanics_finite_f64(area_m2) || young_modulus_pa <= 0.0 || area_m2 <= 0.0) { return Err(MechanicsError.InvalidMaterial); }
-    for (i in 0..coordinates_m.len) { if (!mechanics_finite_f64(coordinates_m.ptr[i])) { return Err(MechanicsError.MechanicsNonFiniteInput); } }
-    for (i in 0..load.len) { if (!mechanics_finite_f64(load.ptr[i])) { return Err(MechanicsError.MechanicsNonFiniteInput); } }
+        stiffness.len != matrix_entries || load.len != node_count) { return Err(MechanicsDimensionMismatch); }
+    if (!mechanics_finite_f64(young_modulus_pa) || !mechanics_finite_f64(area_m2) || young_modulus_pa <= 0.0 || area_m2 <= 0.0) { return Err(InvalidMaterial); }
+    for (i in 0..coordinates_m.len) { if (!mechanics_finite_f64(coordinates_m.ptr[i])) { return Err(MechanicsNonFiniteInput); } }
+    for (i in 0..load.len) { if (!mechanics_finite_f64(load.ptr[i])) { return Err(MechanicsNonFiniteInput); } }
     let mut k_ptr: *f64 = stiffness.ptr;
     for (i in 0..stiffness.len) { k_ptr[i] = 0.0; }
     for (element in 0..element_count) {
         let a: u64 = node_a.ptr[element]; let b: u64 = node_b.ptr[element];
-        if (a >= node_count || b >= node_count || a == b) { return Err(MechanicsError.InvalidGeometry); }
+        if (a >= node_count || b >= node_count || a == b) { return Err(InvalidGeometry); }
         let length: f64 = fabs(coordinates_m.ptr[b] - coordinates_m.ptr[a]);
-        if (!mechanics_finite_f64(length)) { return Err(MechanicsError.MechanicsNonFiniteResult); }
-        if (length <= 0.0) { return Err(MechanicsError.InvalidGeometry); }
+        if (!mechanics_finite_f64(length)) { return Err(MechanicsNonFiniteResult); }
+        if (length <= 0.0) { return Err(InvalidGeometry); }
         let value: f64 = young_modulus_pa * area_m2 / length;
-        if (!mechanics_finite_f64(value) || value <= 0.0) { return Err(MechanicsError.MechanicsNonFiniteResult); }
+        if (!mechanics_finite_f64(value) || value <= 0.0) { return Err(MechanicsNonFiniteResult); }
         let aa: u64 = a * node_count + a; let ab: u64 = a * node_count + b;
         let ba: u64 = b * node_count + a; let bb: u64 = b * node_count + b;
         k_ptr[aa] = k_ptr[aa] + value; k_ptr[ab] = k_ptr[ab] - value;
         k_ptr[ba] = k_ptr[ba] - value; k_ptr[bb] = k_ptr[bb] + value;
         if (!mechanics_finite_f64(k_ptr[aa]) || !mechanics_finite_f64(k_ptr[ab]) ||
-            !mechanics_finite_f64(k_ptr[ba]) || !mechanics_finite_f64(k_ptr[bb])) { return Err(MechanicsError.MechanicsNonFiniteResult); }
+            !mechanics_finite_f64(k_ptr[ba]) || !mechanics_finite_f64(k_ptr[bb])) { return Err(MechanicsNonFiniteResult); }
     }
     return Ok(element_count);
 }
@@ -52,12 +52,12 @@ pub fn apply_dirichlet_constraints_f64(
     stiffness: Span<f64>, load: Span<f64>
 ) -> Result<u64, MechanicsError> {
     if (constrained.len != node_count || prescribed.len != node_count ||
-        load.len != node_count) { return Err(MechanicsError.MechanicsDimensionMismatch); }
+        load.len != node_count) { return Err(MechanicsDimensionMismatch); }
     let matrix_entries: u64 = checked_matrix_entries(node_count)?;
-    if (stiffness.len != matrix_entries) { return Err(MechanicsError.MechanicsDimensionMismatch); }
-    for (i in 0..stiffness.len) { if (!mechanics_finite_f64(stiffness.ptr[i])) { return Err(MechanicsError.MechanicsNonFiniteInput); } }
-    for (i in 0..load.len) { if (!mechanics_finite_f64(load.ptr[i])) { return Err(MechanicsError.MechanicsNonFiniteInput); } }
-    for (i in 0..prescribed.len) { if (!mechanics_finite_f64(prescribed.ptr[i])) { return Err(MechanicsError.MechanicsNonFiniteInput); } }
+    if (stiffness.len != matrix_entries) { return Err(MechanicsDimensionMismatch); }
+    for (i in 0..stiffness.len) { if (!mechanics_finite_f64(stiffness.ptr[i])) { return Err(MechanicsNonFiniteInput); } }
+    for (i in 0..load.len) { if (!mechanics_finite_f64(load.ptr[i])) { return Err(MechanicsNonFiniteInput); } }
+    for (i in 0..prescribed.len) { if (!mechanics_finite_f64(prescribed.ptr[i])) { return Err(MechanicsNonFiniteInput); } }
     let mut k_ptr: *f64 = stiffness.ptr; let mut f_ptr: *f64 = load.ptr;
     for (fixed in 0..node_count) {
         if (constrained.ptr[fixed]) {
@@ -73,8 +73,8 @@ pub fn apply_dirichlet_constraints_f64(
             f_ptr[fixed] = value;
         }
     }
-    for (i in 0..stiffness.len) { if (!mechanics_finite_f64(k_ptr[i])) { return Err(MechanicsError.MechanicsNonFiniteResult); } }
-    for (i in 0..load.len) { if (!mechanics_finite_f64(f_ptr[i])) { return Err(MechanicsError.MechanicsNonFiniteResult); } }
+    for (i in 0..stiffness.len) { if (!mechanics_finite_f64(k_ptr[i])) { return Err(MechanicsNonFiniteResult); } }
+    for (i in 0..load.len) { if (!mechanics_finite_f64(f_ptr[i])) { return Err(MechanicsNonFiniteResult); } }
     return Ok(node_count);
 }
 
@@ -87,6 +87,6 @@ pub fn solve_spd_system_f64(
         n, stiffness, load, displacement, residual, direction, product, max_iterations, tolerance);
     match (result) {
         Ok(report) => { return Ok(report); }
-        Err(error) => { return Err(MechanicsError.LinearSolverFailed); }
+        Err(error) => { return Err(LinearSolverFailed); }
     }
 }

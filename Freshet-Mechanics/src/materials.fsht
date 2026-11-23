@@ -12,10 +12,10 @@ fn validate_isotropic_material(material: IsotropicMaterial) -> Result<u64, Mecha
     if (!mechanics_finite_f64(material.young_modulus_pa) ||
         !mechanics_finite_f64(material.poisson_ratio) ||
         !mechanics_finite_f64(material.density_kg_m3) ||
-        !mechanics_finite_f64(material.yield_strength_pa)) { return Err(MechanicsError.MechanicsNonFiniteInput); }
+        !mechanics_finite_f64(material.yield_strength_pa)) { return Err(MechanicsNonFiniteInput); }
     if (material.young_modulus_pa <= 0.0 || material.poisson_ratio <= -1.0 ||
         material.poisson_ratio >= 0.5 || material.density_kg_m3 < 0.0 ||
-        material.yield_strength_pa <= 0.0) { return Err(MechanicsError.InvalidMaterial); }
+        material.yield_strength_pa <= 0.0) { return Err(InvalidMaterial); }
     return Ok(1);
 }
 
@@ -36,13 +36,13 @@ pub fn isotropic_material(
 pub fn shear_modulus_pa(material: IsotropicMaterial) -> Result<f64, MechanicsError> {
     validate_isotropic_material(material)?;
     let value: f64 = material.young_modulus_pa / (2.0 * (1.0 + material.poisson_ratio));
-    if (!mechanics_finite_f64(value)) { return Err(MechanicsError.MechanicsNonFiniteResult); }
+    if (!mechanics_finite_f64(value)) { return Err(MechanicsNonFiniteResult); }
     return Ok(value);
 }
 
 pub fn bulk_modulus_pa(material: IsotropicMaterial) -> Result<f64, MechanicsError> {
     validate_isotropic_material(material)?;
     let value: f64 = material.young_modulus_pa / (3.0 * (1.0 - 2.0 * material.poisson_ratio));
-    if (!mechanics_finite_f64(value)) { return Err(MechanicsError.MechanicsNonFiniteResult); }
+    if (!mechanics_finite_f64(value)) { return Err(MechanicsNonFiniteResult); }
     return Ok(value);
 }

@@ -248,8 +248,14 @@ fn periodic_boundaries() -> MACBoundaryConditions2D {
     };
     let applied: Result<u64, FluidError> = mac_apply_velocity_boundaries_2d(3, 3, boundaries, span(u), span(v));
     match (applied) { Ok(n) => { assert(n == 1); } Err(error) => { assert(false); } }
+    // Left Inflow prescribes the normal velocity on the left face column.
     assert(u[0] == 2.0 && u[4] == 2.0 && u[8] == 2.0);
-    assert(u[1] == 0.25 && u[5] == 0.25 && u[9] == 0.25);
+    // A bottom Wall's tangential speed drives the bottom row of u faces;
+    // u rows away from that wall are not touched.
+    assert(u[1] == 0.25 && u[2] == 0.25);
+    assert(u[5] == 1.0 && u[9] == 1.0);
+    // The left Inflow's tangential value drives the first interior column of v.
+    assert(v[3] == 0.0 && v[6] == 0.0);
 }
 
 

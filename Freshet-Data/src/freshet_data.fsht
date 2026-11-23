@@ -523,6 +523,11 @@ pub fn binary_open_write(path: str, order: ByteOrder) -> Result<BinaryFile, Data
     return open_binary(path, "wb", order, true);
 }
 
+// Close a binary handle exactly once. A `borrowed mut` close cannot
+// invalidate other copies of the handle struct (fsht-03:02 aggregate
+// borrows do not write back), so a second close would fclose the same
+// handle twice; pair every open with a single deferred close and use
+// binary_flush when data must be visible before the defer fires.
 pub fn binary_close(borrowed mut file: BinaryFile) {
     if (file.handle != nil) {
         fclose(file.handle);

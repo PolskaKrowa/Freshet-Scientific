@@ -1,5 +1,17 @@
 # Roadmap
 
+## 0.2.1 — first reference-compiler validation
+
+The complete 0.2.0 surface was compiled, linked and executed against the
+reference Penstock compiler with its LLVM 23 backend for the first time:
+all four test suites pass (16/12/19/16), all four static-library targets
+build and every example runs. The fixes this surfaced — the weighted Jacobi
+projection sweep, the serial floating-point maxima, the cross-module
+operator visibility, the exactly-once close contract and the source-surface
+corrections — are listed in the changelog; the corresponding Penstock-side
+limitations are recorded in `docs/VALIDATION.md` so the workarounds can be
+retired when the compiler moves.
+
 ## 0.2.0 — correctness and breadth foundations
 
 Implemented in this release:

@@ -409,9 +409,11 @@ pub fn stable_timestep_2d(
     let cells: u64 = grid_cell_count_2d(nx, ny)?;
     if (u.len != cells || v.len != cells) { return Err(DimensionMismatch); }
     validate_finite(u)?; validate_finite(v)?;
+    // Serial deterministic maxima (see max_f64 in Freshet-Numerics for the
+    // floating-point min/max parfor reduction backend note).
     let mut max_u: f64 = 0.0;
     let mut max_v: f64 = 0.0;
-    @reproducible parfor (i in 0..cells) [reduction(max:max_u), reduction(max:max_v)] {
+    for (i in 0..cells) {
         let au: f64 = fabs(u.ptr[i]); let av: f64 = fabs(v.ptr[i]);
         if (au > max_u) { max_u = au; }
         if (av > max_v) { max_v = av; }
@@ -436,8 +438,8 @@ pub fn mac_stable_timestep_2d(
     if (u_faces.len != mac_u_face_count_2d(nx, ny)? || v_faces.len != mac_v_face_count_2d(nx, ny)?) { return Err(DimensionMismatch); }
     validate_finite(u_faces)?; validate_finite(v_faces)?;
     let mut max_u: f64 = 0.0; let mut max_v: f64 = 0.0;
-    @reproducible parfor (i in 0..u_faces.len) [reduction(max:max_u)] { if (fabs(u_faces.ptr[i]) > max_u) { max_u = fabs(u_faces.ptr[i]); } }
-    @reproducible parfor (i in 0..v_faces.len) [reduction(max:max_v)] { if (fabs(v_faces.ptr[i]) > max_v) { max_v = fabs(v_faces.ptr[i]); } }
+    for (i in 0..u_faces.len) { let absolute: f64 = fabs(u_faces.ptr[i]); if (absolute > max_u) { max_u = absolute; } }
+    for (i in 0..v_faces.len) { let absolute: f64 = fabs(v_faces.ptr[i]); if (absolute > max_v) { max_v = absolute; } }
     let rate: f64 = max_u / dx + max_v / dy + 2.0 * viscosity * (1.0 / (dx * dx) + 1.0 / (dy * dy));
     if (!finite_f64(rate)) { return Err(NonFiniteResult); }
     if (rate > 0.0) {
@@ -562,8 +564,10 @@ fn boundary_pressure_gradient(boundary: BoundaryCondition2D, cell_pressure: f64,
 
 fn max_abs(values: Span<f64>) -> Result<f64, FluidError> {
     validate_finite(values)?;
+    // Serial deterministic maximum: floating-point min/max parfor reductions
+    // currently lower to LLVM intrinsics LLVM 20-23 do not provide.
     let mut maximum: f64 = 0.0;
-    @reproducible parfor (i in 0..values.len) [reduction(max:maximum)] {
+    for (i in 0..values.len) {
         let absolute: f64 = fabs(values.ptr[i]);
         if (absolute > maximum) { maximum = absolute; }
     }
@@ -718,6 +722,16 @@ pub fn project_incompressible_mac_2d(
     let mut pressure_residual: f64 = 1.0e300;
     let mut converged: bool = false;
 
+    // Weighted (under-relaxed) Jacobi.  Plain Jacobi's odd-even "checkerboard"
+    // mode is an eigenvalue -1 mode of the periodic and homogeneous-Neumann
+    // 5-point operator on even grids, so an unweighted sweep never damps it
+    // and the pressure residual stalls at the checkerboard energy of the
+    // right-hand side for general velocity fields.  The relaxation weight
+    // omega < 1 makes every non-gauge mode contractive (1 - omega + omega*lambda),
+    // keeps the exact discrete solution as the fixed point, and preserves the
+    // disjoint parallel writes of the sweep.
+    let relaxation: f64 = 0.8;
+
     // Jacobi solve for Lp=(rho/dt)D(u*). Each face contribution carries its
     // own diagonal, neighbour and boundary source, including half-cell Dirichlet.
     for (iteration in 0..max_iterations) {
@@ -752,11 +766,12 @@ pub fn project_incompressible_mac_2d(
                     source = source + pressure_face_source(boundaries.top, dy);
                 }
                 let rhs: f64 = rhs_scale * divergence.ptr[cell];
-                scratch_ptr[cell] = (neighbour_sum + source - rhs) / diagonal;
+                let jacobi_target: f64 = (neighbour_sum + source - rhs) / diagonal;
+                scratch_ptr[cell] = relaxation * jacobi_target + (1.0 - relaxation) * pressure_ptr[cell];
             }
         }
         let mut residual_max: f64 = 0.0;
-        parfor (row in 0..ny) [reduction(max:residual_max)] {
+        for (row in 0..ny) {
             for (col in 0..nx) {
                 let cell: u64 = row * nx + col;
                 let mut neighbour_sum: f64 = 0.0;

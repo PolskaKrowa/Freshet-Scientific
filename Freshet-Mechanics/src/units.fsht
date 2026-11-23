@@ -17,14 +17,14 @@ pub struct QuantitySI {
 fn checked_exponent_add(a: i32, b: i32) -> Result<i32, MechanicsError> {
     match (checked_add(a, b)) {
         Some(value) => { return Ok(value); }
-        None => { return Err(MechanicsError.MechanicsSizeOverflow); }
+        None => { return Err(MechanicsSizeOverflow); }
     }
 }
 
 fn checked_exponent_subtract(a: i32, b: i32) -> Result<i32, MechanicsError> {
     match (checked_sub(a, b)) {
         Some(value) => { return Ok(value); }
-        None => { return Err(MechanicsError.MechanicsSizeOverflow); }
+        None => { return Err(MechanicsSizeOverflow); }
     }
 }
 
@@ -33,7 +33,7 @@ pub fn quantity_si(
     current_power: i32, temperature_power: i32, amount_power: i32,
     luminous_intensity_power: i32
 ) -> Result<QuantitySI, MechanicsError> {
-    if (!mechanics_finite_f64(value)) { return Err(MechanicsError.MechanicsNonFiniteInput); }
+    if (!mechanics_finite_f64(value)) { return Err(MechanicsNonFiniteInput); }
     return Ok(QuantitySI {
         value: value, length_power: length_power, mass_power: mass_power,
         time_power: time_power, current_power: current_power,
@@ -43,13 +43,13 @@ pub fn quantity_si(
 }
 
 pub fn quantity_add_si(a: QuantitySI, b: QuantitySI) -> Result<QuantitySI, MechanicsError> {
-    if (!mechanics_finite_f64(a.value) || !mechanics_finite_f64(b.value)) { return Err(MechanicsError.MechanicsNonFiniteInput); }
+    if (!mechanics_finite_f64(a.value) || !mechanics_finite_f64(b.value)) { return Err(MechanicsNonFiniteInput); }
     if (a.length_power != b.length_power || a.mass_power != b.mass_power ||
         a.time_power != b.time_power || a.current_power != b.current_power ||
         a.temperature_power != b.temperature_power || a.amount_power != b.amount_power ||
-        a.luminous_intensity_power != b.luminous_intensity_power) { return Err(MechanicsError.MechanicsDimensionMismatch); }
+        a.luminous_intensity_power != b.luminous_intensity_power) { return Err(MechanicsDimensionMismatch); }
     let value: f64 = a.value + b.value;
-    if (!mechanics_finite_f64(value)) { return Err(MechanicsError.MechanicsNonFiniteResult); }
+    if (!mechanics_finite_f64(value)) { return Err(MechanicsNonFiniteResult); }
     return Ok(QuantitySI {
         value: value, length_power: a.length_power, mass_power: a.mass_power,
         time_power: a.time_power, current_power: a.current_power,
@@ -59,13 +59,13 @@ pub fn quantity_add_si(a: QuantitySI, b: QuantitySI) -> Result<QuantitySI, Mecha
 }
 
 pub fn quantity_subtract_si(a: QuantitySI, b: QuantitySI) -> Result<QuantitySI, MechanicsError> {
-    if (!mechanics_finite_f64(a.value) || !mechanics_finite_f64(b.value)) { return Err(MechanicsError.MechanicsNonFiniteInput); }
+    if (!mechanics_finite_f64(a.value) || !mechanics_finite_f64(b.value)) { return Err(MechanicsNonFiniteInput); }
     if (a.length_power != b.length_power || a.mass_power != b.mass_power ||
         a.time_power != b.time_power || a.current_power != b.current_power ||
         a.temperature_power != b.temperature_power || a.amount_power != b.amount_power ||
-        a.luminous_intensity_power != b.luminous_intensity_power) { return Err(MechanicsError.MechanicsDimensionMismatch); }
+        a.luminous_intensity_power != b.luminous_intensity_power) { return Err(MechanicsDimensionMismatch); }
     let value: f64 = a.value - b.value;
-    if (!mechanics_finite_f64(value)) { return Err(MechanicsError.MechanicsNonFiniteResult); }
+    if (!mechanics_finite_f64(value)) { return Err(MechanicsNonFiniteResult); }
     return Ok(QuantitySI {
         value: value, length_power: a.length_power, mass_power: a.mass_power,
         time_power: a.time_power, current_power: a.current_power,
@@ -75,7 +75,7 @@ pub fn quantity_subtract_si(a: QuantitySI, b: QuantitySI) -> Result<QuantitySI, 
 }
 
 pub fn quantity_multiply_si(a: QuantitySI, b: QuantitySI) -> Result<QuantitySI, MechanicsError> {
-    if (!mechanics_finite_f64(a.value) || !mechanics_finite_f64(b.value)) { return Err(MechanicsError.MechanicsNonFiniteInput); }
+    if (!mechanics_finite_f64(a.value) || !mechanics_finite_f64(b.value)) { return Err(MechanicsNonFiniteInput); }
     let length_power: i32 = checked_exponent_add(a.length_power, b.length_power)?;
     let mass_power: i32 = checked_exponent_add(a.mass_power, b.mass_power)?;
     let time_power: i32 = checked_exponent_add(a.time_power, b.time_power)?;
@@ -84,7 +84,7 @@ pub fn quantity_multiply_si(a: QuantitySI, b: QuantitySI) -> Result<QuantitySI, 
     let amount_power: i32 = checked_exponent_add(a.amount_power, b.amount_power)?;
     let luminous_intensity_power: i32 = checked_exponent_add(a.luminous_intensity_power, b.luminous_intensity_power)?;
     let value: f64 = a.value * b.value;
-    if (!mechanics_finite_f64(value)) { return Err(MechanicsError.MechanicsNonFiniteResult); }
+    if (!mechanics_finite_f64(value)) { return Err(MechanicsNonFiniteResult); }
     return Ok(QuantitySI {
         value: value, length_power: length_power, mass_power: mass_power,
         time_power: time_power, current_power: current_power,
@@ -94,8 +94,8 @@ pub fn quantity_multiply_si(a: QuantitySI, b: QuantitySI) -> Result<QuantitySI, 
 }
 
 pub fn quantity_divide_si(a: QuantitySI, b: QuantitySI) -> Result<QuantitySI, MechanicsError> {
-    if (!mechanics_finite_f64(a.value) || !mechanics_finite_f64(b.value)) { return Err(MechanicsError.MechanicsNonFiniteInput); }
-    if (b.value == 0.0) { return Err(MechanicsError.InvalidGeometry); }
+    if (!mechanics_finite_f64(a.value) || !mechanics_finite_f64(b.value)) { return Err(MechanicsNonFiniteInput); }
+    if (b.value == 0.0) { return Err(InvalidGeometry); }
     let length_power: i32 = checked_exponent_subtract(a.length_power, b.length_power)?;
     let mass_power: i32 = checked_exponent_subtract(a.mass_power, b.mass_power)?;
     let time_power: i32 = checked_exponent_subtract(a.time_power, b.time_power)?;
@@ -104,7 +104,7 @@ pub fn quantity_divide_si(a: QuantitySI, b: QuantitySI) -> Result<QuantitySI, Me
     let amount_power: i32 = checked_exponent_subtract(a.amount_power, b.amount_power)?;
     let luminous_intensity_power: i32 = checked_exponent_subtract(a.luminous_intensity_power, b.luminous_intensity_power)?;
     let value: f64 = a.value / b.value;
-    if (!mechanics_finite_f64(value)) { return Err(MechanicsError.MechanicsNonFiniteResult); }
+    if (!mechanics_finite_f64(value)) { return Err(MechanicsNonFiniteResult); }
     return Ok(QuantitySI {
         value: value, length_power: length_power, mass_power: mass_power,
         time_power: time_power, current_power: current_power,

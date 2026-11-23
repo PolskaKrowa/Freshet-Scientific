@@ -9,16 +9,17 @@ are written in Freshet and use the ratified `fsht-03:03` language/runtime
 surface and its documented math intrinsics, without language extensions or
 compiler source modifications.
 
-## Libraries in 0.2.0
+## Libraries in 0.2.1
 
 | Library | Responsibility | Included foundations |
 |---|---|---|
-| **Freshet-Numerics** | Arithmetic and linear algebra | Stable scaled 2-norm, checked finite-value kernels, dense and blocked matrix products, COO-to-CSR assembly, CSR SpMV, matrix-free `LinearOperatorF64`, Jacobi preconditioning, CG/PCG and BiCGStab |
+| **Freshet-Numerics** | Arithmetic and linear algebra | Stable scaled 2-norm, checked finite-value kernels, dense and blocked matrix products, COO-to-CSR assembly, CSR SpMV, matrix-free `LinearOperatorF64` (with the shipped `DiagonalOperatorF64`), Jacobi preconditioning, CG/PCG and BiCGStab |
 | **Freshet-Data** | Bounded-memory and columnar data processing | Welford/Chan statistics, mergeable covariance accumulators, histograms, fixed-width binary block I/O (`f64`, `f32`, `i64`, `u64`), explicit byte order, zero-copy record-batch column views and reusable chunk transforms |
 | **Freshet-Fluid** | Structured-grid incompressible CFD | Consistent 2D MAC-grid pressure projection, pressure residual and divergence reports, boundary-condition types, conservative periodic and closed-wall scalar fluxes, Heun RK2, 3D MAC divergence and a lid-driven cavity profile example |
 | **Freshet-Mechanics** | Engineering and structural mechanics | SI dimensional quantities, 2D/3D vectors, isotropic materials, statics, beam formulae, 2D/3D truss element stiffness, stress invariants and a 1D axial-bar FEM assembly/solve path |
 
-This is a substantial **0.2.0 research foundation**, not a declaration that
+This is a substantial **0.2.1 research foundation** — the first release
+validated end-to-end against the reference Penstock compiler — not a declaration that
 every numerical model is validated for safety-critical design or production
 CFD. Solver convergence, conditioning, boundary-condition suitability and
 model assumptions remain application responsibilities. Advanced 3D flow,
@@ -108,7 +109,12 @@ PENSTOCK=penstock ./tools/test-all.sh
   during assembly.
 - `LinearOperatorF64` uses static dispatch and caller-owned output spans. CG
   requires an SPD operator; PCG additionally requires a suitable positive
-  preconditioner. BiCGStab is provided for nonsymmetric operators.
+  preconditioner. BiCGStab is provided for nonsymmetric operators. Under the
+  current Penstock visibility rules, operator types must be visible from the
+  `freshet_numerics` module (the shipped dense, CSR, diagonal and fixture
+  operators are); see the Freshet-Numerics README. Floating-point min/max
+  kernels are serial deterministic maxima until the reference compiler's
+  reduction lowering links against LLVM 20-23.
 - Solver workspaces must not alias each other or the input/output spans unless
   a function explicitly documents alias support. `axpy_f64` permits exact
   `x`/`y` aliasing; arbitrary partial overlap is not supported.

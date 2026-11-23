@@ -99,13 +99,19 @@ import freshet_data;
     let input: [f64; 3] = [1.25, -2.5, 9.0];
     let mut scratch: [f64; 3] = [0.0, 0.0, 0.0];
     let mut output: [f64; 3] = [0.0, 0.0, 0.0];
+    // Closes are deferred exactly once per handle: a `borrowed mut` close
+    // cannot invalidate the caller's copy of the handle, so an explicit
+    // close followed by the deferred close would fclose the same handle
+    // twice. Flush explicitly instead when data must be visible on disk
+    // before the deferred close fires.
     let opened_writer: Result<BinaryFile, DataError> = binary_open_write("data_binary_test.bin", BigEndian);
     let mut writer: BinaryFile = BinaryFile { handle: nil, byte_order: BigEndian, writable: true };
     match (opened_writer) { Ok(file) => { writer = file; } Err(error) => { assert(false); } }
     defer binary_close(&mut writer);
     let wrote: Result<u64, DataError> = binary_write_f64(&mut writer, span(input), span(scratch));
     match (wrote) { Ok(count) => { assert(count == 3); } Err(error) => { assert(false); } }
-    binary_close(&mut writer);
+    let flushed: Result<u64, DataError> = binary_flush(&mut writer);
+    match (flushed) { Ok(n) => { assert(n == 0); } Err(error) => { assert(false); } }
     let opened_reader: Result<BinaryFile, DataError> = binary_open_read("data_binary_test.bin", BigEndian);
     let mut reader: BinaryFile = BinaryFile { handle: nil, byte_order: BigEndian, writable: false };
     match (opened_reader) { Ok(file) => { reader = file; } Err(error) => { assert(false); } }
@@ -113,7 +119,6 @@ import freshet_data;
     let read: Result<u64, DataError> = binary_read_f64(&mut reader, span(output));
     match (read) { Ok(count) => { assert(count == 3); } Err(error) => { assert(false); } }
     assert(output[0] == input[0] && output[1] == input[1] && output[2] == input[2]);
-    binary_close(&mut reader);
     io::remove("data_binary_test.bin");
 }
 
@@ -154,7 +159,8 @@ import freshet_data;
     defer binary_close(&mut writer_f32);
     let wrote_f32: Result<u64, DataError> = binary_write_f32(&mut writer_f32, span(input_f32), span(scratch_f32));
     match (wrote_f32) { Ok(n) => { assert(n == 3); } Err(error) => { assert(false); } }
-    binary_close(&mut writer_f32);
+    let flushed_f32: Result<u64, DataError> = binary_flush(&mut writer_f32);
+    match (flushed_f32) { Ok(n) => { } Err(error) => { assert(false); } }
     let opened_f32_reader: Result<BinaryFile, DataError> = binary_open_read("data_f32_test.bin", LittleEndian);
     let mut reader_f32: BinaryFile = BinaryFile { handle: nil, byte_order: LittleEndian, writable: false };
     match (opened_f32_reader) { Ok(file) => { reader_f32 = file; } Err(error) => { assert(false); } }
@@ -162,7 +168,6 @@ import freshet_data;
     let read_f32: Result<u64, DataError> = binary_read_f32(&mut reader_f32, span(output_f32));
     match (read_f32) { Ok(n) => { assert(n == 3); } Err(error) => { assert(false); } }
     assert(output_f32[0] == input_f32[0] && output_f32[1] == input_f32[1] && output_f32[2] == input_f32[2]);
-    binary_close(&mut reader_f32);
     io::remove("data_f32_test.bin");
 
     let input_i64: [i64; 3] = [1, -2, 9000000000];
@@ -174,7 +179,8 @@ import freshet_data;
     defer binary_close(&mut writer_i64);
     let wrote_i64: Result<u64, DataError> = binary_write_i64(&mut writer_i64, span(input_i64), span(scratch_i64));
     match (wrote_i64) { Ok(n) => { assert(n == 3); } Err(error) => { assert(false); } }
-    binary_close(&mut writer_i64);
+    let flushed_i64: Result<u64, DataError> = binary_flush(&mut writer_i64);
+    match (flushed_i64) { Ok(n) => { } Err(error) => { assert(false); } }
     let opened_i64_reader: Result<BinaryFile, DataError> = binary_open_read("data_i64_test.bin", BigEndian);
     let mut reader_i64: BinaryFile = BinaryFile { handle: nil, byte_order: BigEndian, writable: false };
     match (opened_i64_reader) { Ok(file) => { reader_i64 = file; } Err(error) => { assert(false); } }
@@ -182,7 +188,6 @@ import freshet_data;
     let read_i64: Result<u64, DataError> = binary_read_i64(&mut reader_i64, span(output_i64));
     match (read_i64) { Ok(n) => { assert(n == 3); } Err(error) => { assert(false); } }
     assert(output_i64[0] == input_i64[0] && output_i64[1] == input_i64[1] && output_i64[2] == input_i64[2]);
-    binary_close(&mut reader_i64);
     io::remove("data_i64_test.bin");
 
     let input_u64: [u64; 3] = [1, 9223372036854775808, 18446744073709551615];
@@ -194,7 +199,8 @@ import freshet_data;
     defer binary_close(&mut writer_u64);
     let wrote_u64: Result<u64, DataError> = binary_write_u64(&mut writer_u64, span(input_u64), span(scratch_u64));
     match (wrote_u64) { Ok(n) => { assert(n == 3); } Err(error) => { assert(false); } }
-    binary_close(&mut writer_u64);
+    let flushed_u64: Result<u64, DataError> = binary_flush(&mut writer_u64);
+    match (flushed_u64) { Ok(n) => { } Err(error) => { assert(false); } }
     let opened_u64_reader: Result<BinaryFile, DataError> = binary_open_read("data_u64_test.bin", LittleEndian);
     let mut reader_u64: BinaryFile = BinaryFile { handle: nil, byte_order: LittleEndian, writable: false };
     match (opened_u64_reader) { Ok(file) => { reader_u64 = file; } Err(error) => { assert(false); } }
@@ -202,7 +208,6 @@ import freshet_data;
     let read_u64: Result<u64, DataError> = binary_read_u64(&mut reader_u64, span(output_u64));
     match (read_u64) { Ok(n) => { assert(n == 3); } Err(error) => { assert(false); } }
     assert(output_u64[0] == input_u64[0] && output_u64[1] == input_u64[1] && output_u64[2] == input_u64[2]);
-    binary_close(&mut reader_u64);
     io::remove("data_u64_test.bin");
 }
 
@@ -229,9 +234,11 @@ import freshet_data;
 @test fn typed_record_batch_views_cover_all_scalar_column_types() {
     let storage: *u64 = malloc(u64, 7);
     defer free(storage);
-    let doubles: *f64 = storage as *f64;
-    let floats: *f32 = storage as *f32;
-    let signed: *i64 = storage as *i64;
+    // Cast-derived pointers are not owned; writes through them require
+    // mutable bindings (Penstock's pointer-mutability rule).
+    let mut doubles: *f64 = storage as *f64;
+    let mut floats: *f32 = storage as *f32;
+    let mut signed: *i64 = storage as *i64;
     doubles[0] = 1.5; doubles[1] = 2.5;
     floats[4] = 3.25; floats[5] = 4.5;
     signed[3] = 11; signed[4] = 22;
@@ -280,7 +287,6 @@ import freshet_data;
     let wrote: Result<u64, DataError> = binary_write_f64(&mut writer, span(input), span(write_scratch));
     match (wrote) { Ok(n) => { assert(n == 4); } Err(error) => { assert(false); } }
     binary_flush(&mut writer);
-    binary_close(&mut writer);
 
     let mut input_buffer: [f64; 4] = [0.0, 0.0, 0.0, 0.0];
     let mut output_buffer: [f64; 4] = [0.0, 0.0, 0.0, 0.0];
@@ -298,7 +304,6 @@ import freshet_data;
     let read: Result<u64, DataError> = binary_read_f64(&mut reader, span(output));
     match (read) { Ok(n) => { assert(n == 4); } Err(error) => { assert(false); } }
     assert(output[0] == 3.0 && output[1] == -3.0 && output[2] == 8.0 && output[3] == 17.0);
-    binary_close(&mut reader);
     io::remove("data_transform_input.bin");
     io::remove("data_transform_output.bin");
 }

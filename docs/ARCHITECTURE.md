@@ -45,7 +45,13 @@ close calls or `defer` on all return paths.
 Parallel kernels read immutable spans and write to distinct output indices
 through mutable pointer aliases accepted by Penstock's `parfor` checks.
 Scalar reductions use explicit reduction clauses; reproducibility-sensitive
-sums request `@reproducible`.
+sums request `@reproducible`. Floating-point min/max kernels are currently
+serial deterministic maxima because the reference compiler's min/max
+reduction lowering does not link against the LLVM 20-23 backend matrix (see
+`docs/VALIDATION.md`); integer min/max reductions and `reduction(+:…)` remain
+parallel. The MAC pressure solve is a weighted Jacobi sweep whose relaxation
+damps the otherwise undamped odd-even mode of periodic and homogeneous-Neumann
+grids.
 
 ## Numerical behaviour
 

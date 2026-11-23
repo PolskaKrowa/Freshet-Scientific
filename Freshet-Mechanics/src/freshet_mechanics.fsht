@@ -10,4 +10,4 @@ import trusses;
 import stress;
 import fem;
 
-pub fn version() -> str { return "0.2.0"; }
+pub fn version() -> str { return "0.2.1"; }

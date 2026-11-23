@@ -33,8 +33,11 @@ receive a caller-owned scratch span so byte swapping never mutates the input
 buffer and no temporary allocation is required per call. Scratch and input
 spans must not overlap. Reads return the
 number of complete elements and report `TruncatedBlock` if the file ends in a
-partial element. `binary_close` closes a handle; use `defer` for all early
-return paths.
+partial element. `binary_close` closes a handle **exactly once** — a
+`borrowed mut` close cannot invalidate other copies of the handle struct
+(fsht-03:02 aggregate borrows do not write back), so a second close of the
+same handle is undefined. Pair every open with a single deferred close and
+call `binary_flush` when data must be visible before the defer fires.
 
 `process_binary_f64_chunks<T: BinaryChunkTransformF64>` provides a generic,
 statically-dispatched bounded-memory reader → reusable input buffer →

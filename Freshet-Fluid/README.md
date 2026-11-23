@@ -19,8 +19,13 @@ import freshet_fluid;
   `D(G(p))`.
 - `project_incompressible_mac_2d` solves the pressure Poisson equation using
   the same face-gradient and cell-divergence convention used by the velocity
-  correction. It reports the pressure-equation residual and maximum initial
-  and final divergence separately.
+  correction, with a weighted (under-relaxed) Jacobi sweep (omega = 0.8): the
+  plain iteration's odd-even mode is an undamped eigenvalue -1 mode on
+  periodic and homogeneous-Neumann grids, which would stall the residual for
+  general velocity fields. It reports the pressure-equation residual and
+  maximum initial and final divergence separately; the residual merge and
+  the norm helpers are serial deterministic maxima (see the Freshet-Numerics
+  README's floating-point min/max reduction note).
 - `mac_apply_velocity_boundaries_2d` supports explicit `Dirichlet`, `Neumann`,
   `Periodic`, `Wall`, `Inflow` and `Outflow` kinds. The descriptor separates
   normal/tangential velocity data from pressure value/gradient data.

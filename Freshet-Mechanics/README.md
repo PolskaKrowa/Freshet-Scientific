@@ -27,7 +27,7 @@ The public modules are `mechanics_common`, `units`, `vectors`, `materials`,
 `statics`, `beams`, `trusses`, `stress` and `fem`.
 
 Mechanics error variants use the `Mechanics` prefix (for example,
-`MechanicsError.MechanicsDimensionMismatch`) so they remain distinct from
+`Err(MechanicsDimensionMismatch)`) so they remain distinct from
 the concise `NumericsError` variants. Numerics error construction and
 pattern matching use the normal context-resolved variant names (for
 example, `Err(NonFiniteResult)`). This allows both APIs to be imported

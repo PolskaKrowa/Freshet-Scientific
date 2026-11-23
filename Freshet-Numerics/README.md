@@ -16,7 +16,8 @@ import freshet_numerics;
 |---|---|
 | `fill_f64(output, value)` | Fill an output span |
 | `scale_f64(alpha, input, output)` | `output = alpha * input` |
-| `sum_f64(input)` / `max_f64(input)` | Deterministic sum / maximum |
+| `sum_f64(input)` | Reproducible parallel sum |
+| `max_f64(input)` | Deterministic serial maximum |
 | `dot_f64(a, b)` | Reproducible dot product |
 | `norm2_f64(values)` | Scaled sum-of-squares Euclidean norm |
 | `axpy_f64(alpha, x, y)` | In-place `y = alpha*x + y` |
@@ -28,6 +29,13 @@ The norm avoids squaring raw magnitudes and therefore handles many vectors
 whose direct sum of squares would overflow or underflow. A norm whose true
 result is itself outside the `f64` range is reported as `NonFiniteResult`.
 
+`max_f64` and the other floating-point maxima in this repository are
+computed by serial deterministic loops: the reference compiler currently
+lowers floating-point min/max parfor reductions to LLVM intrinsics that do
+not exist in LLVM 20-23, so those kernels stay serial until its backend
+matrix is corrected. Integer reductions and `reduction(+:…)` remain
+parallel.
+
 ## Sparse matrices and solvers
 
 `CSRMatrixF64` is a non-owning CSR view containing `rows`, `cols`, `nnz`, row
@@ -37,9 +45,15 @@ provided COO entries into caller-owned CSR output arrays and workspace.
 Duplicate entries are retained and contribute additively during SpMV; entries
 are not sorted or coalesced by the conversion routine.
 
-The static-dispatch `LinearOperatorF64` trait represents `y = A*x`. Dense and
-CSR types implement it, and application-defined types can implement it for
-matrix-free operations. `PreconditionerF64` provides the corresponding
+The static-dispatch `LinearOperatorF64` trait represents `y = A*x`. Dense
+and CSR types implement it, and `DiagonalOperatorF64` ships as the
+provided matrix-free diagonal operator. Note that Penstock's current
+generic-instantiation visibility rules resolve trait impls from the module
+that owns the generic solver, so operator types must be declared in (or be
+visible from) `freshet_numerics`; `ShortOperatorF64` and
+`OverflowOperatorF64` also ship with the library as intentionally
+contract-violating fixtures for the solver validation tests and must not be
+used as real operators. `PreconditionerF64` provides the corresponding
 preconditioner interface.
 
 Implemented iterative solvers:
