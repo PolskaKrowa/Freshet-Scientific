@@ -565,16 +565,20 @@ pub fn stable_timestep_2d(
     if (u.len != cells || v.len != cells) { return Err(DimensionMismatch); }
     validate_finite(u)?;
     validate_finite(v)?;
-    // Serial deterministic maxima (see max_f64 in Freshet-Numerics for the
-    // floating-point min/max parfor reduction backend note).
+    // Parallel maxima: the reference compiler's fmin/fmax fix (2026-11-24)
+    // lowers floating-point min/max parfor reductions to
+    // llvm.minnum/llvm.maxnum on the whole LLVM 19-23 matrix, so the
+    // historical serial-maximum workaround is retired (see max_f64 in
+    // Freshet-Numerics).  The finite-input validation above makes the
+    // reduction order-insensitive.
     let mut max_u: f64 = 0.0;
     let mut max_v: f64 = 0.0;
 
-    for (i in 0..cells) {
-        let au: f64 = fabs(u.ptr[i]);
-        let av: f64 = fabs(v.ptr[i]);
-        if (au > max_u) { max_u = au; }
-        if (av > max_v) { max_v = av; }
+    parfor (i in 0..cells) [reduction(max:max_u)] {
+        max_u = fmax(max_u, fabs(u.ptr[i]));
+    }
+    parfor (i in 0..cells) [reduction(max:max_v)] {
+        max_v = fmax(max_v, fabs(v.ptr[i]));
     }
 
     let rate: f64 = max_u / dx + max_v / dy + 2.0 * viscosity *

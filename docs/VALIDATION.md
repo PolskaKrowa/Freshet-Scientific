@@ -87,21 +87,37 @@ commands, not static analysis.
   abort in the Data tests, the reserved-keyword `step` identifier and the
   main-body generic-instantiation crash in the sparse PCG example.
 
-## Known reference-compiler limitations observed (not worked around in code beyond the above)
+## Known reference-compiler limitations observed (status update, 2026-11-24)
 
 These are Penstock-side behaviours recorded so future releases can drop the
-corresponding workarounds when the compiler changes; none of them require
-changes to Freshet-lang or Penstock from this repository:
+corresponding workarounds when the compiler changes. As of the
+2026-11-24 OptKern-Proposition round, the Penstock development tree
+(the accompanying `Penstock` tarball) addresses
+all four; each workaround below is annotated with its landing place:
 
-- Floating-point `reduction(min:…)`/`reduction(max:…)` parfor lowering emits
-  `llvm.fmin`/`llvm.fmax`, which LLVM 20-23 do not provide; the affected
-  kernels use serial deterministic maxima for now.
-- A `fn main()` that directly instantiates a trait-generic function crashes
-  the current compiler; generic calls are issued from ordinary functions.
-- Trait impls are resolved from the module owning the generic function, so
-  matrix-free operator types must be visible from `freshet_numerics`.
-- `borrowed mut` aggregate parameters do not write back; handle closes are
-  exactly-once by construction.
+- Floating-point `reduction(min:…)`/`reduction(max:…)` parfor lowering emitted
+  `llvm.fmin`/`llvm.fmax`, which LLVM 20-23 do not provide. **Fixed in the development tree:** the lowering now emits `llvm.minnum`/
+  `llvm.maxnum` on the whole 19-23 matrix with NaN/±0 semantics documented
+  in spec ch. 13. This release's `max_f64` and the Fluid CFL maxima are
+  parallel reductions again; the static scan's "no floating-point
+  `reduction(min:/max:)` clauses" rule can be retired once a validated
+  compiler build ships the fix.
+- A `fn main()` that directly instantiates a trait-generic function crashed
+  the compiler. **Covered:** the crash class was the sema
+  snapshot-iteration fix already in the development tree; the corpus test
+  `tests/pos_generic_main.fsht` now locks the behaviour in.
+- Trait impls were resolved from the module owning the generic function, so
+  matrix-free operator types had to be visible from `freshet_numerics`.
+  **Fixed:** trait-impl member functions are now visible wherever
+  their mangled names arise (the Mechanics→Numerics dependency direction
+  works); `tests/pos_trait_xmodule.fsht` locks it in.
+- `borrowed mut` aggregate parameters did not write back. **Fixed:**
+  the write-back runs at every function exit after the deferred statements;
+  `tests/pos_borrow_mut_writeback.fsht` locks it in.
+
+Revalidation with a built compiler that carries these fixes is expected to
+confirm the same suite counts; the four workarounds in this package's
+sources were retired in the same round (parallel maxima above).
 
 ## Checks performed in the package environment (retained and extended for 0.3.0)
 

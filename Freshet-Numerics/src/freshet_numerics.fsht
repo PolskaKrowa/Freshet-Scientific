@@ -144,14 +144,16 @@ pub fn sum_f64(input: Span<f64>) -> Result<f64, NumericsError> {
 pub fn max_f64(input: Span<f64>) -> Result<f64, NumericsError> {
     if (input.len == 0) { return Err(InvalidDimension); }
     validate_finite_span(input)?;
-    // Serial deterministic maximum: Penstock 0.1.0 lowers floating-point
-    // min/max parfor reductions to llvm.fmin/llvm.fmax, which LLVM 20-23 do
-    // not provide, so this kernel avoids that construct until the reference
-    // compiler emits llvm.maxnum/llvm.minimum for the backend matrix.
+    // Parallel reduction: the reference compiler's fmin/fmax fix (2026-11-24)
+    // lowers floating-point min/max parfor reductions to
+    // llvm.minnum/llvm.maxnum — the spelling every LLVM 19-23 backend
+    // provides — so the historical serial-maximum workaround is retired.
+    // minnum semantics with the finite-input validation above: the
+    // reduction is order-insensitive, so any thread count agrees.
     let mut maximum: f64 = input.ptr[0];
 
-    for (i in 0..input.len) {
-        if (input.ptr[i] > maximum) { maximum = input.ptr[i]; }
+    parfor (i in 0..input.len) [reduction(max:maximum)] {
+        maximum = fmax(maximum, input.ptr[i]);
     }
 
     return Ok(maximum);
